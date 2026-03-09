@@ -1,17 +1,13 @@
-import aiosqlite
 import asyncpg
 from datetime import datetime, timedelta
+import logging
 import json
 import re
 
 from config import DATABASE_URL
 
-USE_POSTGRES = DATABASE_URL.startswith("postgresql")
-DB_PATH = "words_bot.db"
-if DATABASE_URL.startswith("sqlite+aiosqlite:///"):
-    DB_PATH = DATABASE_URL.replace("sqlite+aiosqlite:///", "", 1) or DB_PATH
-ADMIN_AUDIT_TABLE = "admin.audit_log" if USE_POSTGRES else "admin_audit_log"
-ADMIN_SETTINGS_TABLE = "admin.settings" if USE_POSTGRES else "admin_settings"
+ADMIN_AUDIT_TABLE = "admin.audit_log"
+ADMIN_SETTINGS_TABLE = "admin.settings"
 
 
 class _PgCursor:
@@ -73,11 +69,22 @@ class _PgConnection:
 
     async def __aenter__(self):
         dsn = self._dsn
+        if not dsn or not dsn.startswith("postgres"):
+            raise ValueError("Invalid or empty DATABASE_URL for PostgreSQL.")
+
+        # Log the DSN for debugging, but hide the password
+        safe_dsn = re.sub(r"://[^@/]+@", "://<user>:<password>@", dsn)
+        logging.info(f"Connecting to PostgreSQL with DSN: {safe_dsn}")
+
         if dsn.startswith("postgresql+asyncpg://"):
             dsn = "postgresql://" + dsn[len("postgresql+asyncpg://") :]
         elif dsn.startswith("postgres+asyncpg://"):
             dsn = "postgres://" + dsn[len("postgres+asyncpg://") :]
-        self._conn = await asyncpg.connect(dsn)
+        try:
+            self._conn = await asyncpg.connect(dsn)
+        except Exception as e:
+            logging.error(f"Failed to connect to PostgreSQL: {e}")
+            raise
         return self
 
     async def __aexit__(self, exc_type, exc, tb):
@@ -147,9 +154,7 @@ def _translate_sql_for_postgres(sql: str, params: tuple) -> tuple[str, tuple]:
 
 
 def _db_connect():
-    if USE_POSTGRES:
-        return _PgConnection(DATABASE_URL)
-    return aiosqlite.connect(DB_PATH)
+    return _PgConnection(DATABASE_URL)
 
 # ═══════════════════════════════════════════════════════
 # INIT
@@ -258,170 +263,8 @@ async def _init_postgres_schema():
 
 
 async def init_db():
-    if USE_POSTGRES:
-        await _init_postgres_schema()
-        return
-
-    async with _db_connect() as db:
-        # Enforce foreign keys for all connections
-        await db.execute("PRAGMA foreign_keys = ON;")
-
-        await db.execute("""
-            CREATE TABLE IF NOT EXISTS users (
-                user_id         INTEGER PRIMARY KEY,
-                username        TEXT,
-                joined_at       TEXT,
-                streak          INTEGER DEFAULT 0,
-                last_active     TEXT,
-                daily_count     INTEGER DEFAULT 0,
-                daily_date      TEXT
-            )
-        """)
-        await db.execute("""
-            CREATE TABLE IF NOT EXISTS word_progress (
-                id              INTEGER PRIMARY KEY AUTOINCREMENT,
-                user_id         INTEGER NOT NULL,
-                word            TEXT NOT NULL,
-                level           INTEGER DEFAULT 0,
-                seen            INTEGER DEFAULT 0,
-                correct         INTEGER DEFAULT 0,
-                correct_streak  INTEGER DEFAULT 0,
-                wrong           INTEGER DEFAULT 0,
-                learned         INTEGER DEFAULT 0,
-                marked_hard     INTEGER DEFAULT 0,
-                marked_know     INTEGER DEFAULT 0,
-                added_at        TEXT,
-                learned_at      TEXT,
-                next_review     TEXT,
-                UNIQUE(user_id, word),
-                FOREIGN KEY (user_id) REFERENCES users(user_id) ON DELETE CASCADE
-            )
-        """)
-        await db.execute("""
-            CREATE TABLE IF NOT EXISTS sessions (
-                id          INTEGER PRIMARY KEY AUTOINCREMENT,
-                user_id     INTEGER NOT NULL,
-                word        TEXT NOT NULL,
-                answered_at TEXT NOT NULL,
-                correct     INTEGER NOT NULL,
-                FOREIGN KEY (user_id) REFERENCES users(user_id) ON DELETE CASCADE
-            )
-        """)
-        await db.execute("""
-            CREATE TABLE IF NOT EXISTS story_history (
-                id          INTEGER PRIMARY KEY AUTOINCREMENT,
-                user_id     INTEGER NOT NULL,
-                story_date  TEXT NOT NULL,
-                genre       TEXT NOT NULL,
-                words_json  TEXT NOT NULL,
-                story_text  TEXT NOT NULL,
-                created_at  TEXT NOT NULL,
-                FOREIGN KEY (user_id) REFERENCES users(user_id) ON DELETE CASCADE
-            )
-        """)
-        await db.execute("""
-            CREATE TABLE IF NOT EXISTS memory_palace_history (
-                id          INTEGER PRIMARY KEY AUTOINCREMENT,
-                user_id     INTEGER NOT NULL,
-                palace_date TEXT NOT NULL,
-                theme       TEXT NOT NULL,
-                words_json  TEXT NOT NULL,
-                palace_text TEXT NOT NULL,
-                created_at  TEXT NOT NULL,
-                FOREIGN KEY (user_id) REFERENCES users(user_id) ON DELETE CASCADE
-            )
-        """)
-        await db.execute("CREATE INDEX IF NOT EXISTS idx_progress_user ON word_progress(user_id)")
-        await db.execute("CREATE INDEX IF NOT EXISTS idx_progress_review ON word_progress(user_id, next_review)")
-        await db.execute("CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id)")
-        await db.execute("CREATE INDEX IF NOT EXISTS idx_story_user_date ON story_history(user_id, story_date)")
-        await db.execute(
-            "CREATE INDEX IF NOT EXISTS idx_palace_user_date ON memory_palace_history(user_id, palace_date)"
-        )
-        await db.execute(
-            """
-            CREATE TABLE IF NOT EXISTS admin_audit_log (
-                id              INTEGER PRIMARY KEY AUTOINCREMENT,
-                actor_user_id   INTEGER NOT NULL,
-                target_user_id  INTEGER,
-                action          TEXT NOT NULL,
-                details         TEXT,
-                metadata_json   TEXT,
-                created_at      TEXT NOT NULL
-            )
-            """
-        )
-        await db.execute(
-            "CREATE INDEX IF NOT EXISTS idx_admin_audit_created ON admin_audit_log(created_at)"
-        )
-        await db.execute(
-            """
-            CREATE TABLE IF NOT EXISTS admin_settings (
-                key         TEXT PRIMARY KEY,
-                value       TEXT NOT NULL,
-                updated_at  TEXT NOT NULL
-            )
-            """
-        )
-        # Add user_level column if it doesn't exist
-        try:
-            await db.execute("ALTER TABLE users ADD COLUMN user_level TEXT")
-        except Exception:
-            # ignore if already exists
-            pass
-        # Moderation fields
-        try:
-            await db.execute("ALTER TABLE users ADD COLUMN banned INTEGER DEFAULT 0")
-        except Exception:
-            # ignore if already exists
-            pass
-        try:
-            await db.execute("ALTER TABLE users ADD COLUMN ban_reason TEXT")
-        except Exception:
-            # ignore if already exists
-            pass
-        try:
-            await db.execute("ALTER TABLE users ADD COLUMN placement_done INTEGER DEFAULT 0")
-        except Exception:
-            # ignore if already exists
-            pass
-        try:
-            await db.execute("ALTER TABLE users ADD COLUMN placement_score INTEGER DEFAULT 0")
-        except Exception:
-            # ignore if already exists
-            pass
-        try:
-            await db.execute("ALTER TABLE users ADD COLUMN placement_taken_at TEXT")
-        except Exception:
-            # ignore if already exists
-            pass
-        # SRS v1 fields
-        try:
-            await db.execute("ALTER TABLE word_progress ADD COLUMN ease_factor REAL DEFAULT 2.5")
-        except Exception:
-            # ignore if already exists
-            pass
-        try:
-            await db.execute("ALTER TABLE word_progress ADD COLUMN interval_days INTEGER DEFAULT 0")
-        except Exception:
-            # ignore if already exists
-            pass
-        try:
-            await db.execute("ALTER TABLE word_progress ADD COLUMN repetitions INTEGER DEFAULT 0")
-        except Exception:
-            # ignore if already exists
-            pass
-        try:
-            await db.execute("ALTER TABLE word_progress ADD COLUMN last_reviewed_at TEXT")
-        except Exception:
-            # ignore if already exists
-            pass
-        try:
-            await db.execute("ALTER TABLE word_progress ADD COLUMN last_grade TEXT")
-        except Exception:
-            # ignore if already exists
-            pass
-        await db.commit()
+    """Initializes the database schema for PostgreSQL."""
+    await _init_postgres_schema()
 
 
 # ═══════════════════════════════════════════════════════
@@ -433,7 +276,6 @@ async def ensure_user(user_id: int, username: str = ""):
     today = datetime.now().date().isoformat()
     safe_username = (username or "").strip()[:64]
     async with _db_connect() as db:
-        await db.execute("PRAGMA foreign_keys = ON;")
         await db.execute("""
             INSERT OR IGNORE INTO users (user_id, username, joined_at, daily_date)
             VALUES (?, ?, ?, ?)
@@ -454,8 +296,7 @@ async def ensure_user(user_id: int, username: str = ""):
 
 async def update_streak(user_id: int):
     async with _db_connect() as db:
-        await db.execute("PRAGMA foreign_keys = ON;")
-        db.row_factory = aiosqlite.Row
+        db.row_factory = asyncpg.Record
         async with db.execute(
             "SELECT streak, last_active FROM users WHERE user_id = ?",
             (user_id,)
@@ -493,8 +334,7 @@ async def update_streak(user_id: int):
 async def get_daily_count(user_id: int) -> int:
     today = datetime.now().date().isoformat()
     async with _db_connect() as db:
-        await db.execute("PRAGMA foreign_keys = ON;")
-        db.row_factory = aiosqlite.Row
+        db.row_factory = asyncpg.Record
         async with db.execute(
             "SELECT daily_count, daily_date FROM users WHERE user_id = ?",
             (user_id,)
@@ -517,7 +357,6 @@ async def get_daily_count(user_id: int) -> int:
 async def increment_daily(user_id: int, word: str | None = None):
     today = datetime.now().date().isoformat()
     async with _db_connect() as db:
-        await db.execute("PRAGMA foreign_keys = ON;")
         # Count only unique words per day (same word answered multiple times today counts once)
         should_increment = True
         if word:
@@ -565,7 +404,6 @@ async def set_user_level(user_id: int, level: str):
     if level not in {"A1", "A2", "B1", "B2"}:
         return
     async with _db_connect() as db:
-        await db.execute("PRAGMA foreign_keys = ON;")
         await db.execute(
             "UPDATE users SET user_level = ? WHERE user_id = ?",
             (level, user_id),
@@ -575,8 +413,7 @@ async def set_user_level(user_id: int, level: str):
 
 async def get_user_level(user_id: int) -> str:
     async with _db_connect() as db:
-        await db.execute("PRAGMA foreign_keys = ON;")
-        db.row_factory = aiosqlite.Row
+        db.row_factory = asyncpg.Record
         async with db.execute(
             "SELECT user_level FROM users WHERE user_id = ?",
             (user_id,),
@@ -588,7 +425,7 @@ async def get_user_level(user_id: int) -> str:
 
 async def is_placement_done(user_id: int) -> bool:
     async with _db_connect() as db:
-        db.row_factory = aiosqlite.Row
+        db.row_factory = asyncpg.Record
         async with db.execute(
             "SELECT COALESCE(placement_done, 0) AS placement_done FROM users WHERE user_id = ?",
             (user_id,),
@@ -687,8 +524,7 @@ async def get_next_word(
 ) -> str:
     import random
     async with _db_connect() as db:
-        await db.execute("PRAGMA foreign_keys = ON;")
-        db.row_factory = aiosqlite.Row
+        db.row_factory = asyncpg.Record
         today = datetime.now().isoformat()
         allowed = list(all_words)
         excluded_set = set()
@@ -766,8 +602,7 @@ async def get_word_reason(user_id: int, word: str) -> str:
 
     now = datetime.now().isoformat()
     async with _db_connect() as db:
-        await db.execute("PRAGMA foreign_keys = ON;")
-        db.row_factory = aiosqlite.Row
+        db.row_factory = asyncpg.Record
         async with db.execute(
             """
             SELECT seen, marked_hard, next_review, correct, wrong
@@ -802,8 +637,7 @@ async def record_answer(
 ):
     now = datetime.now().isoformat()
     async with _db_connect() as db:
-        await db.execute("PRAGMA foreign_keys = ON;")
-        db.row_factory = aiosqlite.Row
+        db.row_factory = asyncpg.Record
 
         await db.execute(
             """
@@ -909,7 +743,7 @@ async def record_answer(
 
 async def get_stats(user_id: int, total_words: int) -> dict:
     async with _db_connect() as db:
-        db.row_factory = aiosqlite.Row
+        db.row_factory = asyncpg.Record
         today = datetime.now().isoformat()
 
         async with db.execute("""
@@ -951,7 +785,7 @@ async def get_stats(user_id: int, total_words: int) -> dict:
 async def get_hard_words(user_id: int) -> list[dict]:
     """🔁 Կրկնել սեղմած բառերը"""
     async with _db_connect() as db:
-        db.row_factory = aiosqlite.Row
+        db.row_factory = asyncpg.Record
         async with db.execute("""
             SELECT word, wrong, correct, added_at, last_grade
             FROM word_progress
@@ -965,7 +799,7 @@ async def get_hard_words(user_id: int) -> list[dict]:
 async def get_seen_words(user_id: int, limit: int = 300) -> list[str]:
     """Return words that user has already seen at least once."""
     async with _db_connect() as db:
-        db.row_factory = aiosqlite.Row
+        db.row_factory = asyncpg.Record
         async with db.execute(
             """
             SELECT word
@@ -984,7 +818,7 @@ async def get_today_answered_words(user_id: int, limit: int = 10) -> list[str]:
     today = datetime.now().date().isoformat()
     safe_limit = max(1, min(int(limit or 10), 30))
     async with _db_connect() as db:
-        db.row_factory = aiosqlite.Row
+        db.row_factory = asyncpg.Record
         async with db.execute(
             """
             SELECT word
@@ -1015,28 +849,24 @@ async def save_story_history(user_id: int, genre: str, words: list[str], story_t
     story_date = now[:10]
     words_json = json.dumps(list(dict.fromkeys(words or [])), ensure_ascii=False)
     async with _db_connect() as db:
-        await db.execute("PRAGMA foreign_keys = ON;")
         sql = """
             INSERT INTO story_history (user_id, story_date, genre, words_json, story_text, created_at)
             VALUES (?, ?, ?, ?, ?, ?)
         """
-        if USE_POSTGRES:
-            sql += " RETURNING id"
+        sql += " RETURNING id"
         cur = await db.execute(
             sql,
             (user_id, story_date, (genre or "general")[:40], words_json, story_text, now),
         )
         await db.commit()
-        if USE_POSTGRES:
-            row = await cur.fetchone()
-            return int((row["id"] if row and "id" in row else 0) or 0)
-        return int(cur.lastrowid or 0)
+        row = await cur.fetchone()
+        return int((row["id"] if row and "id" in row else 0) or 0)
 
 
 async def count_story_generations_today(user_id: int) -> int:
     today = datetime.now().date().isoformat()
     async with _db_connect() as db:
-        db.row_factory = aiosqlite.Row
+        db.row_factory = asyncpg.Record
         async with db.execute(
             "SELECT COUNT(*) AS c FROM story_history WHERE user_id = ? AND story_date = ?",
             (user_id, today),
@@ -1048,7 +878,7 @@ async def count_story_generations_today(user_id: int) -> int:
 async def get_story_history(user_id: int, limit: int = 5) -> list[dict]:
     safe_limit = max(1, min(int(limit or 5), 20))
     async with _db_connect() as db:
-        db.row_factory = aiosqlite.Row
+        db.row_factory = asyncpg.Record
         async with db.execute(
             """
             SELECT story_date, genre, words_json, story_text, created_at
@@ -1076,29 +906,25 @@ async def save_memory_palace_history(user_id: int, theme: str, words: list[str],
     palace_date = now[:10]
     words_json = json.dumps(list(dict.fromkeys(words or [])), ensure_ascii=False)
     async with _db_connect() as db:
-        await db.execute("PRAGMA foreign_keys = ON;")
         sql = """
             INSERT INTO memory_palace_history
                 (user_id, palace_date, theme, words_json, palace_text, created_at)
             VALUES (?, ?, ?, ?, ?, ?)
         """
-        if USE_POSTGRES:
-            sql += " RETURNING id"
+        sql += " RETURNING id"
         cur = await db.execute(
             sql,
             (user_id, palace_date, (theme or "general")[:40], words_json, palace_text, now),
         )
         await db.commit()
-        if USE_POSTGRES:
-            row = await cur.fetchone()
-            return int((row["id"] if row and "id" in row else 0) or 0)
-        return int(cur.lastrowid or 0)
+        row = await cur.fetchone()
+        return int((row["id"] if row and "id" in row else 0) or 0)
 
 
 async def count_palace_generations_today(user_id: int) -> int:
     today = datetime.now().date().isoformat()
     async with _db_connect() as db:
-        db.row_factory = aiosqlite.Row
+        db.row_factory = asyncpg.Record
         async with db.execute(
             "SELECT COUNT(*) AS c FROM memory_palace_history WHERE user_id = ? AND palace_date = ?",
             (user_id, today),
@@ -1110,7 +936,7 @@ async def count_palace_generations_today(user_id: int) -> int:
 async def get_memory_palace_history(user_id: int, limit: int = 5) -> list[dict]:
     safe_limit = max(1, min(int(limit or 5), 20))
     async with _db_connect() as db:
-        db.row_factory = aiosqlite.Row
+        db.row_factory = asyncpg.Record
         async with db.execute(
             """
             SELECT palace_date, theme, words_json, palace_text, created_at
@@ -1137,7 +963,6 @@ async def mark_word_learned(user_id: int, word: str) -> bool:
     """Move a word from review list to learned list."""
     now = datetime.now().isoformat()
     async with _db_connect() as db:
-        await db.execute("PRAGMA foreign_keys = ON;")
         await db.execute(
             """
             INSERT OR IGNORE INTO word_progress (user_id, word, added_at)
@@ -1164,7 +989,7 @@ async def mark_word_learned(user_id: int, word: str) -> bool:
 async def get_top_weak_words(user_id: int, limit: int = 3) -> list[dict]:
     """Words with the highest error pressure."""
     async with _db_connect() as db:
-        db.row_factory = aiosqlite.Row
+        db.row_factory = asyncpg.Record
         async with db.execute(
             """
             SELECT word, wrong, correct
@@ -1187,7 +1012,7 @@ async def get_wordset_progress(user_id: int, words: list[str]) -> dict:
         return {"total": 0, "learned": 0, "accuracy": 0}
     placeholders = ",".join("?" * len(uniq))
     async with _db_connect() as db:
-        db.row_factory = aiosqlite.Row
+        db.row_factory = asyncpg.Record
         async with db.execute(
             f"""
             SELECT COALESCE(SUM(marked_know), 0) AS learned
@@ -1224,7 +1049,7 @@ async def get_wordset_progress(user_id: int, words: list[str]) -> dict:
 async def get_recent_accuracy(user_id: int, limit: int = 20) -> int:
     """Accuracy percentage for the latest N answered words."""
     async with _db_connect() as db:
-        db.row_factory = aiosqlite.Row
+        db.row_factory = asyncpg.Record
         async with db.execute(
             """
             SELECT correct
@@ -1247,7 +1072,7 @@ async def get_recent_accuracy(user_id: int, limit: int = 20) -> int:
 async def get_recent_accuracy_window(user_id: int, limit: int = 20, offset: int = 0) -> int | None:
     """Accuracy for a window of latest answers (supports OFFSET). Returns None if window is empty."""
     async with _db_connect() as db:
-        db.row_factory = aiosqlite.Row
+        db.row_factory = asyncpg.Record
         async with db.execute(
             """
             SELECT correct
@@ -1270,7 +1095,7 @@ async def get_recent_accuracy_window(user_id: int, limit: int = 20, offset: int 
 async def get_learned_words(user_id: int) -> list[dict]:
     """✅ Գիտեմ սեղմած բառերը"""
     async with _db_connect() as db:
-        db.row_factory = aiosqlite.Row
+        db.row_factory = asyncpg.Record
         async with db.execute("""
             SELECT word, correct, learned_at, last_grade
             FROM word_progress
@@ -1287,7 +1112,7 @@ async def get_word_grade_map(user_id: int, words: list[str]) -> dict[str, str]:
         return {}
     placeholders = ",".join("?" * len(uniq))
     async with _db_connect() as db:
-        db.row_factory = aiosqlite.Row
+        db.row_factory = asyncpg.Record
         async with db.execute(
             f"""
             SELECT word, COALESCE(last_grade, '') AS last_grade, marked_hard, marked_know, seen
@@ -1316,7 +1141,6 @@ async def get_word_grade_map(user_id: int, words: list[str]) -> dict[str, str]:
 
 async def reset_progress(user_id: int, *, preserve_history: bool = True):
     async with _db_connect() as db:
-        await db.execute("PRAGMA foreign_keys = ON;")
         if not preserve_history:
             await db.execute("DELETE FROM word_progress WHERE user_id = ?", (user_id,))
             await db.execute("DELETE FROM sessions WHERE user_id = ?", (user_id,))
@@ -1332,8 +1156,7 @@ async def reset_progress(user_id: int, *, preserve_history: bool = True):
 
 async def get_admin_overview() -> dict:
     async with _db_connect() as db:
-        await db.execute("PRAGMA foreign_keys = ON;")
-        db.row_factory = aiosqlite.Row
+        db.row_factory = asyncpg.Record
 
         async with db.execute("SELECT COUNT(*) AS c FROM users") as cur:
             total_users = int((await cur.fetchone())["c"])
@@ -1366,7 +1189,7 @@ async def get_admin_overview() -> dict:
 async def get_health_snapshot() -> dict:
     """Basic DB health check + key row counts for admin /health command."""
     async with _db_connect() as db:
-        db.row_factory = aiosqlite.Row
+        db.row_factory = asyncpg.Record
 
         async with db.execute("SELECT 1 AS ok") as cur:
             row = await cur.fetchone()
@@ -1396,7 +1219,7 @@ async def get_health_snapshot() -> dict:
 async def get_all_users(limit: int = 200) -> list[dict]:
     safe_limit = max(1, min(int(limit or 200), 1000))
     async with _db_connect() as db:
-        db.row_factory = aiosqlite.Row
+        db.row_factory = asyncpg.Record
         async with db.execute(
             """
             SELECT
@@ -1429,7 +1252,7 @@ async def get_all_user_ids() -> list[int]:
 async def get_top_leaderboard(limit: int = 10) -> list[dict]:
     safe_limit = max(1, min(int(limit or 10), 50))
     async with _db_connect() as db:
-        db.row_factory = aiosqlite.Row
+        db.row_factory = asyncpg.Record
         async with db.execute(
             """
             SELECT
@@ -1470,7 +1293,7 @@ async def get_top_leaderboard(limit: int = 10) -> list[dict]:
 
 async def is_banned(user_id: int) -> bool:
     async with _db_connect() as db:
-        db.row_factory = aiosqlite.Row
+        db.row_factory = asyncpg.Record
         async with db.execute(
             "SELECT COALESCE(banned, 0) AS banned FROM users WHERE user_id = ?",
             (user_id,),
@@ -1484,7 +1307,7 @@ async def find_user_id_by_username(username: str) -> int | None:
     if not clean:
         return None
     async with _db_connect() as db:
-        db.row_factory = aiosqlite.Row
+        db.row_factory = asyncpg.Record
         async with db.execute(
             """
             SELECT user_id
@@ -1502,7 +1325,6 @@ async def find_user_id_by_username(username: str) -> int | None:
 async def set_user_ban(user_id: int, banned: bool, reason: str = "") -> bool:
     reason = (reason or "").strip()[:300]
     async with _db_connect() as db:
-        await db.execute("PRAGMA foreign_keys = ON;")
         cur = await db.execute(
             """
             UPDATE users
@@ -1536,23 +1358,20 @@ async def log_admin_action(
             VALUES (?, ?, ?, ?, ?, ?)
             """
         )
-        if USE_POSTGRES:
-            sql += " RETURNING id"
+        sql += " RETURNING id"
         cur = await db.execute(
             sql,
             (int(actor_user_id), target_user_id, safe_action, safe_details, meta_json, now),
         )
         await db.commit()
-        if USE_POSTGRES:
-            row = await cur.fetchone()
-            return int((row["id"] if row else 0) or 0)
-        return int(cur.lastrowid or 0)
+        row = await cur.fetchone()
+        return int((row["id"] if row else 0) or 0)
 
 
 async def get_admin_audit_logs(limit: int = 20) -> list[dict]:
     safe_limit = max(1, min(int(limit or 20), 200))
     async with _db_connect() as db:
-        db.row_factory = aiosqlite.Row
+        db.row_factory = asyncpg.Record
         async with db.execute(
             f"""
             SELECT id, actor_user_id, target_user_id, action, details, metadata_json, created_at

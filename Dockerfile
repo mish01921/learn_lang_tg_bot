@@ -19,8 +19,5 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copy the rest of the application code
 COPY . /app/
 
-# Create a volume for the SQLite database to persist data
-VOLUME ["/app/data"]
-
 # Run bot.py when the container launches
 CMD ["python", "bot.py"]

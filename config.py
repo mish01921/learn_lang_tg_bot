@@ -29,10 +29,11 @@ def _getenv(name: str, default: str = "") -> str:
 
 
 # Keep a test-safe fallback so imports don't fail in local tests.
-TOKEN = _getenv("TOKEN", "123456:TEST_TOKEN")
+# Prioritize BOT_TOKEN (standard), fallback to TOKEN (legacy)
+TOKEN = _getenv("BOT_TOKEN", _getenv("TOKEN", "123456:TEST_TOKEN"))
 GEMINI_API_KEY = _getenv("GEMINI_API_KEY", "")
 GOOGLE_TRANSLATE_API_KEY = _getenv("GOOGLE_TRANSLATE_API_KEY", "")
-DATABASE_URL = _getenv("DATABASE_URL", "sqlite+aiosqlite:///words_bot.db")
+DATABASE_URL = _getenv("DATABASE_URL", "postgresql+asyncpg://user:password@localhost/english_bot_db")
 
 
 def _parse_admin_ids(raw: str) -> set[int]:

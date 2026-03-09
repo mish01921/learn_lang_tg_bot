@@ -88,20 +88,21 @@ again adv.
 
 class TestDatabaseNextWord(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
-        self.tmp = tempfile.NamedTemporaryFile(delete=False)
-        self.tmp.close()
-        self.old_db_path = database.DB_PATH
-        database.DB_PATH = self.tmp.name
+        # Ensure schema exists
         await database.init_db()
+        
+        # Clean up tables before each test
+        async with database._db_connect() as db:
+            await db.execute("TRUNCATE users, word_progress, sessions, story_history, memory_palace_history, admin.audit_log RESTART IDENTITY CASCADE")
+            
         await database.ensure_user(1, "tester")
 
     async def asyncTearDown(self):
-        database.DB_PATH = self.old_db_path
-        os.remove(self.tmp.name)
+        pass
 
     async def test_hard_due_word_priority(self):
         due = (datetime.now() - timedelta(days=1)).isoformat()
-        async with database.aiosqlite.connect(database.DB_PATH) as db:
+        async with database._db_connect() as db:
             await db.execute(
                 """
                 INSERT INTO word_progress (user_id, word, marked_hard, next_review, added_at)
@@ -123,7 +124,7 @@ class TestDatabaseNextWord(unittest.IsolatedAsyncioTestCase):
 
     async def test_hard_due_can_be_skipped(self):
         due = (datetime.now() - timedelta(days=1)).isoformat()
-        async with database.aiosqlite.connect(database.DB_PATH) as db:
+        async with database._db_connect() as db:
             await db.execute(
                 """
                 INSERT INTO word_progress (user_id, word, marked_hard, next_review, added_at)
@@ -148,7 +149,7 @@ class TestDatabaseNextWord(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(word, "normal_due")
 
     async def test_new_word_is_returned_when_unseen_exists(self):
-        async with database.aiosqlite.connect(database.DB_PATH) as db:
+        async with database._db_connect() as db:
             await db.execute(
                 """
                 INSERT INTO word_progress (user_id, word, added_at)
@@ -163,7 +164,7 @@ class TestDatabaseNextWord(unittest.IsolatedAsyncioTestCase):
         self.assertIn(word, {"fresh1", "fresh2"})
 
     async def test_get_next_word_respects_exclude_word(self):
-        async with database.aiosqlite.connect(database.DB_PATH) as db:
+        async with database._db_connect() as db:
             await db.execute(
                 """
                 INSERT INTO word_progress (user_id, word, marked_hard, next_review, added_at)
@@ -184,7 +185,7 @@ class TestDatabaseNextWord(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(word, "other")
 
     async def test_get_next_word_respects_exclude_words_list(self):
-        async with database.aiosqlite.connect(database.DB_PATH) as db:
+        async with database._db_connect() as db:
             await db.execute(
                 """
                 INSERT INTO word_progress (user_id, word, marked_hard, next_review, added_at)
@@ -238,7 +239,7 @@ class TestDatabaseNextWord(unittest.IsolatedAsyncioTestCase):
 
     async def test_get_seen_words_returns_only_seen(self):
         await database.record_answer(1, "seen_word", correct=True, marked_hard=False)
-        async with database.aiosqlite.connect(database.DB_PATH) as db:
+        async with database._db_connect() as db:
             await db.execute(
                 """
                 INSERT INTO word_progress (user_id, word, seen, added_at)
@@ -307,8 +308,7 @@ class TestDatabaseNextWord(unittest.IsolatedAsyncioTestCase):
 
     async def test_update_streak_refreshes_last_active_same_day(self):
         await database.ensure_user(1, "tester")
-        async with database.aiosqlite.connect(database.DB_PATH) as db:
-            db.row_factory = database.aiosqlite.Row
+        async with database._db_connect() as db:
             async with db.execute(
                 "SELECT last_active FROM users WHERE user_id = ?",
                 (1,),
@@ -318,8 +318,7 @@ class TestDatabaseNextWord(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(first_ts)
 
         await database.ensure_user(1, "tester")
-        async with database.aiosqlite.connect(database.DB_PATH) as db:
-            db.row_factory = database.aiosqlite.Row
+        async with database._db_connect() as db:
             async with db.execute(
                 "SELECT last_active FROM users WHERE user_id = ?",
                 (1,),
@@ -331,8 +330,7 @@ class TestDatabaseNextWord(unittest.IsolatedAsyncioTestCase):
 
     async def test_srs_progression_fields_update(self):
         await database.record_answer(1, "alpha", correct=True, marked_hard=False)
-        async with database.aiosqlite.connect(database.DB_PATH) as db:
-            db.row_factory = database.aiosqlite.Row
+        async with database._db_connect() as db:
             async with db.execute(
                 """
                 SELECT interval_days, repetitions, ease_factor, last_reviewed_at
@@ -348,8 +346,7 @@ class TestDatabaseNextWord(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(bool(row1["last_reviewed_at"]))
 
         await database.record_answer(1, "alpha", correct=True, marked_hard=False)
-        async with database.aiosqlite.connect(database.DB_PATH) as db:
-            db.row_factory = database.aiosqlite.Row
+        async with database._db_connect() as db:
             async with db.execute(
                 """
                 SELECT interval_days, repetitions
@@ -365,8 +362,7 @@ class TestDatabaseNextWord(unittest.IsolatedAsyncioTestCase):
         await database.record_answer(1, "beta", correct=True, marked_hard=False)
         await database.record_answer(1, "beta", correct=True, marked_hard=False)
         await database.record_answer(1, "beta", correct=False, marked_hard=False)
-        async with database.aiosqlite.connect(database.DB_PATH) as db:
-            db.row_factory = database.aiosqlite.Row
+        async with database._db_connect() as db:
             async with db.execute(
                 """
                 SELECT interval_days, repetitions, ease_factor
@@ -382,8 +378,7 @@ class TestDatabaseNextWord(unittest.IsolatedAsyncioTestCase):
     async def test_srs_easy_interval_is_longer_than_good(self):
         await database.record_answer(1, "good_word", correct=True, marked_hard=False, grade="good")
         await database.record_answer(1, "easy_word", correct=True, marked_hard=False, grade="easy")
-        async with database.aiosqlite.connect(database.DB_PATH) as db:
-            db.row_factory = database.aiosqlite.Row
+        async with database._db_connect() as db:
             async with db.execute(
                 "SELECT interval_days FROM word_progress WHERE user_id = ? AND word = ?",
                 (1, "good_word"),

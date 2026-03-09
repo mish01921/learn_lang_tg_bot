@@ -1,13 +1,12 @@
-<<<<<<< HEAD
 # 🇬🇧 English Word Learning Telegram Bot
 
-Այս նախագիծը **Telegram բոտ** է, որը օգնում է օգտատերերին սովորել անգլերենի ամենաշատ օգտագործվող բառերը (A1-ից B2 մակարդակներ)՝ օգտագործելով **Spaced Repetition System (SRS)** և **Artificial Intelligence (Google Gemini)**:
+Այս նախագիծը **Telegram բոտ** է, որը օգնում է օգտատերերին սովորել անգլերենի ամենաշատ օգտագործվող բառերը (A1-ից C2 մակարդակներ)՝ օգտագործելով **Spaced Repetition System (SRS)** և **Artificial Intelligence (Google Gemini)**:
 
 Բոտը պահում է օգտատիրոջ առաջընթացը, տրամադրում է վիճակագրություն, առաջարկում է կոնտեքստային պատմություններ և ունի հզոր ադմինիստրատիվ վահանակ։
 
 ## ✨ Հիմնական հնարավորություններ
 
-- **📚 Բառապաշար:** 3000+ ամենահաճախ օգտագործվող բառեր (Oxford list)՝ բաժանված ըստ CEFR մակարդակների (A1, A2, B1, B2, C1, B2):
+- **📚 Բառապաշար:** 3000+ ամենահաճախ օգտագործվող բառեր (Oxford list)՝ բաժանված ըստ CEFR մակարդակների (A1, A2, B1, B2, C1, C2):
 - **🧠 Smart Learning (SRS):** Բառերի կրկնության խելացի համակարգ (Again, Hard, Good, Easy), որը հաշվարկում է հաջորդ կրկնության օրը։
 - **🤖 AI Integration (Gemini):**
   - **Contextual Stories:** Ստեղծում է կարճ պատմություններ՝ օգտագործելով օրվա սովորած բառերը։
@@ -21,7 +20,7 @@
 
 - **Python 3.9+**
 - **Aiogram 3.x** (Asynchronous Telegram Bot Framework)
-- **SQLite / PostgreSQL** (Տվյալների բազա)
+- **PostgreSQL** (Տվյալների բազա)
 - **Google Gemini API** (AI գեներացիաների համար)
 - **Dictionary API** (Արտասանության և սահմանումների համար)
 
@@ -62,9 +61,7 @@ pip install -r requirements.txt
 BOT_TOKEN=your_telegram_bot_token
 GEMINI_API_KEY=your_google_gemini_api_key
 ADMIN_USER_IDS=123456789,987654321
-DATABASE_URL=sqlite+aiosqlite:///words_bot.db
-# Կամ PostgreSQL-ի համար:
-# DATABASE_URL=postgresql+asyncpg://user:password@localhost/dbname
+DATABASE_URL=postgresql+asyncpg://user:password@localhost/dbname
 ```
 
 ### 5. Գործարկեք բոտը

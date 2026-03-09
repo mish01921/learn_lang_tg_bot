@@ -10,8 +10,6 @@ services:
     environment:
       # Փոխում ենք, որ միանա postgres սերվիսին (db)
       - DATABASE_URL=postgresql+asyncpg://bot_user:bot_password@db/english_bot_db
-    volumes:
-      - ./data:/app/data
     depends_on:
       - db
 
@@ -23,6 +21,8 @@ services:
       POSTGRES_USER: bot_user
       POSTGRES_PASSWORD: bot_password
       POSTGRES_DB: english_bot_db
+    ports:
+      - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
 
