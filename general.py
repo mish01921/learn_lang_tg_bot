@@ -221,7 +221,7 @@ async def _send_words_by_level(message: Message, level: str):
     for chunk in _chunk_text(full_text):
         await message.answer(chunk)
 
-@router.message(Command("all_words_A1", "all_words_A2", "all_words_B1", "all_words_B2", "all_words_C1", "all_words_C2"))
+@router.message(Command("all_words_A1", "all_words_A2", "all_words_B1", "all_words_B2"))
 async def all_words_level_handler(message: Message):
     await touch_user_from_message(message)
     if await reject_if_banned_message(message): return

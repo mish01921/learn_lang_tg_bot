@@ -79,7 +79,7 @@ def build_start_text(name: str, total_words: int, daily_limit: int, is_admin: bo
         f"/palace_history [limit] — վերջին memory palace-ները 🧠📚\n"
         f"/placement — մակարդակի test 📝\n"
         f"/levels — բաց/փակ մակարդակներ 🔐\n"
-        f"/all_words — ամբողջ բառերի ցանկը ըստ մակարդակի (A1–C2) 📚\n"
+        f"/all_words — ամբողջ բառերի ցանկը ըստ մակարդակի (A1–B2) 📚\n"
         f"/reset — զրոյացնել առաջընթացը ⚠️\n\n"
         f"Պատրա՞ստ ես սկսել։ Սեղմիր /word 👇"
     )

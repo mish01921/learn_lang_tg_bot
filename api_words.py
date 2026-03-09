@@ -140,11 +140,11 @@ def _load_words_from_file(path: str) -> list[str]:
         return []
 
 
-# Բեռնել լրացուցիչ բառեր ֆայլից և միավորել մինչև 700-ը
-# Տեղադրեք 700 բառի ցանկը տող առ տող այստեղ՝ common_words_700.txt
-_EXTRA_WORDS_FILE = "common_words_700.txt"
+# Բեռնել լրացուցիչ բառեր ֆայլից
+# Տեղադրեք բառերի ցանկը տող առ տող այստեղ՝ common_words.txt
+_EXTRA_WORDS_FILE = "common_words.txt"
 # Մակարդակային գլխագրերը պետք է անտեսվեն COMMON_WORDS-ի համար
-_LEVEL_HEADERS = {"A1", "A2", "B1", "B2", "C1", "C2"}
+_LEVEL_HEADERS = {"A1", "A2", "B1", "B2"}
 _raw_file_words = _load_words_from_file(_EXTRA_WORDS_FILE)
 _file_words = [w for w in _raw_file_words if w.upper() not in _LEVEL_HEADERS]
 
@@ -156,16 +156,9 @@ for w in BASE_COMMON_WORDS + _file_words:
         _seen.add(w)
         _combined.append(w)
 
-# Սահմանափակել առավելագույնը 700-ի
-COMMON_WORDS = _combined[:700]
-
-# Եթե ֆայլից չբեռնվեց ոչինչ և բազային ցանկը <700 — լոգել տեղեկատվություն
-if len(COMMON_WORDS) < 700:
-    logging.info(
-        "COMMON_WORDS currently has %d items. To reach 700, add more words to %s.",
-        len(COMMON_WORDS),
-        _EXTRA_WORDS_FILE,
-    )
+# Ամբողջական ցանկը
+COMMON_WORDS = _combined
+logging.info("COMMON_WORDS loaded: %d items.", len(COMMON_WORDS))
 
 
 

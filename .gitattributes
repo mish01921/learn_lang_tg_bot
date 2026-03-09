@@ -1,0 +1,7 @@
+# Set default behavior to automatic
+* text=auto
+
+# Force LF (Linux line endings) for code and Docker files
+# This prevents "exec format error" or syntax issues inside Linux containers
+*.py text eol=lf
+Dockerfile text eol=lf

@@ -2,8 +2,8 @@ import logging
 import os
 import re
 
-COMMON_WORDS_FILE = "common_words_700.txt"
-LEVEL_KEYS = ("A1", "A2", "B1", "B2", "C1", "C2")
+COMMON_WORDS_FILE = "common_words.txt"
+LEVEL_KEYS = ("A1", "A2", "B1", "B2")
 
 _level_words_cache: dict | None = None
 _level_words_mtime: float | None = None
@@ -16,7 +16,7 @@ def extract_headword(line: str) -> str:
 
 
 def load_levelled_words() -> dict:
-    """Read common_words_700.txt and return {level: [word]} mapping."""
+    """Read common_words.txt and return {level: [word]} mapping."""
     global _level_words_cache, _level_words_mtime
     levels = {k: [] for k in LEVEL_KEYS}
 

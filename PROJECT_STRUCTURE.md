@@ -38,7 +38,7 @@
   - Start text, word card text, search result text, date formatting։
 
 - `level_words.py`
-  - `common_words_700.txt` parser/cache։
+  - `common_words.txt` parser/cache։
   - Oxford-format տողից headword extraction։
   - Level mapping (`A1..C2`), chunking երկար տեքստերի համար։
 
@@ -56,7 +56,7 @@
 - `config.py`
   - Secret/config values (`TOKEN`, API keys)։
 
-- `common_words_700.txt`
+- `common_words.txt`
   - Բառերի աղբյուրը՝ մակարդակներով։
 
 ## Tests

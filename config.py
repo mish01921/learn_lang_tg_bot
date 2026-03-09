@@ -52,7 +52,7 @@ ADMIN_USER_IDS = _parse_admin_ids(_getenv("ADMIN_USER_IDS", ""))
 
 # Bot settings
 DAILY_LIMIT = 5
-WORD_LEVEL_CHOICES = ("A1", "A2", "B1", "B2", "C1", "C2")
+WORD_LEVEL_CHOICES = ("A1", "A2", "B1", "B2")
 DAILY_STORY_LIMIT = 3
 DAILY_PALACE_LIMIT = 3
 
