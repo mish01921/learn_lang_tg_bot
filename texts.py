@@ -1,0 +1,144 @@
+from datetime import datetime
+
+
+def format_word(word_data: dict, current: int, total: int, level: str, coach_hint: str = "") -> str:
+    example = word_data.get("example", "—") or "—"
+    example_tr = word_data.get("example_translation", "—") or "—"
+    audio_url = word_data.get("audio_url", "") or ""
+    audio_line = f"🔊 Pronunciation audio: {audio_url}\n" if audio_url else ""
+    base = (
+        f"🏷️ Level: {level}\n"
+        f"📖 Word: {word_data['word']}   [{current}/{total}]\n"
+        f"🧠 Coach: {coach_hint or 'Պլանային առաջընթաց'}\n"
+        f"🔊 Transcription: {word_data['transcription']}\n"
+        f"{audio_line}"
+        f"🇦🇲 Translation: {word_data['translation']}\n"
+        f"📝 Definition: {word_data['definition']}"
+    )
+    if example != "—" or example_tr != "—":
+        base += f"\n💬 Example: {example}\n" f"🇦🇲 Թարգմանություն: {example_tr}"
+    return base
+
+
+def format_searched_word(word_data: dict, levels: list[str]) -> str:
+    level_text = ", ".join(levels) if levels else "Չի գտնվել level ցուցակներում"
+    example = word_data.get("example", "—") or "—"
+    example_tr = word_data.get("example_translation", "—") or "—"
+    audio_url = word_data.get("audio_url", "") or ""
+    audio_line = f"🔊 Արտասանության հղում: {audio_url}\n" if audio_url else ""
+    base = (
+        f"🔎 Որոնման արդյունք\n"
+        f"🏷️ Level: {level_text}\n"
+        f"📖 Word: {word_data['word']}\n"
+        f"🔊 Transcription: {word_data['transcription']}\n"
+        f"{audio_line}"
+        f"🇦🇲 Translation: {word_data['translation']}\n"
+        f"📝 Definition: {word_data['definition']}"
+    )
+    if example != "—" or example_tr != "—":
+        base += f"\n💬 Example: {example}\n" f"🇦🇲 Թարգմանություն: {example_tr}"
+    return base
+
+
+def format_date(iso_str: str) -> str:
+    try:
+        return datetime.fromisoformat(iso_str).strftime("%d.%m.%Y")
+    except Exception:
+        return ""
+
+
+def build_start_text(name: str, total_words: int, daily_limit: int, is_admin: bool = False) -> str:
+    daily_line = f"🗓 Ամեն օր {daily_limit} նոր բառ"
+    if is_admin:
+        daily_line += " (ադմին՝ անսահմանափակ)"
+    text = (
+        f"Բարև, {name} 👋\n\n"
+        f"Ես անգլերեն բառերի բոտ եմ 📚\n"
+        f"Կօգնեմ սովորել անգլերենի {total_words} ամենաօգտագործվող բառերը։\n\n"
+        f"━━━━━━━━━━━━━━━\n"
+        f"{daily_line}\n"
+        f"❌ «Again» — կարճ interval-ով կկրկնվի\n"
+        f"🟠 «Hard» — բարդ է, բայց ճիշտ էր\n"
+        f"✅ «Good» — նորմալ հիշեցիր\n"
+        f"🚀 «Easy» — հեշտ էր, interval-ը մեծանում է\n"
+        f"⏭️ «Հաջորդ բառը» — պարզապես անցնել, չի հաշվվում\n"
+        f"━━━━━━━━━━━━━━━\n\n"
+        f"📌 Հրամաններ՝\n"
+        f"/word — նոր բառ\n"
+        f"/stats — վիճակագրություն\n"
+        f"/review — սովորելու բառեր 📘\n"
+        f"/learned — սովորած բառեր ✅\n"
+        f"/coach — անձնական մարզչի խորհուրդներ 🧠\n"
+        f"/test — խառը թեստ անցած բառերով 🧪\n"
+        f"/search — փնտրել կոնկրետ բառ 🔎\n"
+        f"/example — AI example նախադասություններ 🧠\n"
+        f"/story — contextual պատմություն օրվա բառերով 📖\n"
+        f"/story_tr — story glossary custom թարգմանություններ 📘\n"
+        f"/story_history [limit] — վերջին պատմությունները 📚\n"
+        f"/palace — textual memory palace 🧠\n"
+        f"/palace_history [limit] — վերջին memory palace-ները 🧠📚\n"
+        f"/placement — մակարդակի test 📝\n"
+        f"/levels — բաց/փակ մակարդակներ 🔐\n"
+        f"/all_words — ամբողջ բառերի ցանկը ըստ մակարդակի (A1–C2) 📚\n"
+        f"/reset — զրոյացնել առաջընթացը ⚠️\n\n"
+        f"Պատրա՞ստ ես սկսել։ Սեղմիր /word 👇"
+    )
+    if is_admin:
+        text += (
+            "\n/admin — ադմին վահանակ 🛠"
+            "\n/health — բոտ/DB առողջության ստուգում 🩺"
+            "\n/users — բոլոր user-ների ցուցակ 👥"
+            "\n/broadcast — զանգվածային հաղորդագրություն 📣"
+            "\n/top — leaderboard 🏆"
+            "\n/ban — արգելափակել user 🚫"
+            "\n/unban — ապաշրջափակել user ✅"
+        )
+    return text
+
+
+def build_coach_text(
+    level: str,
+    today_count: int,
+    daily_limit: int,
+    overall_accuracy: int,
+    recent_accuracy: int,
+    trend_text: str,
+    due_today: int,
+    hard_count: int,
+    weak_words: list[dict],
+    focus_words: list[str],
+    plan_steps: list[str],
+) -> str:
+    if weak_words:
+        weak_text = "\n".join(
+            f"- {w['word']} (սխալ՝ {w.get('wrong', 0)}, ճիշտ՝ {w.get('correct', 0)})"
+            for w in weak_words
+        )
+    else:
+        weak_text = "- Թուլացած բառեր չկան, լավ առաջընթաց ունեք։"
+
+    if focus_words:
+        focus_text = ", ".join(focus_words)
+    else:
+        focus_text = "Առայժմ հատուկ focus բառեր չկան։"
+
+    if plan_steps:
+        plan_text = "\n".join(f"{i}. {step}" for i, step in enumerate(plan_steps, 1))
+    else:
+        plan_text = "1. Շարունակեք /word"
+
+    return (
+        "🧠 Ձեր անձնական մարզիչը\n\n"
+        f"🏷️ Մակարդակ: {level}\n"
+        f"📅 Այսօր: {today_count}/{daily_limit}\n"
+        f"🎯 Ընդհանուր ճշտություն: {overall_accuracy}%\n"
+        f"⚡ Վերջին 20 փորձի ճշտություն: {recent_accuracy}%\n"
+        f"📈 Թրենդ: {trend_text}\n"
+        f"⏰ Due կրկնություններ: {due_today}\n"
+        f"🔁 Hard բառեր: {hard_count}\n\n"
+        "Թուլացած բառեր.\n"
+        f"{weak_text}\n\n"
+        f"🎯 Focus words: {focus_text}\n\n"
+        "Այսօրվա պլան.\n"
+        f"{plan_text}"
+    )
