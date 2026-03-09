@@ -155,10 +155,112 @@ def _db_connect():
 # INIT
 # ═══════════════════════════════════════════════════════
 
+async def _init_postgres_schema():
+    """Creates all tables and indexes for PostgreSQL if they don't exist."""
+    async with _db_connect() as db:
+        # Create admin schema if it doesn't exist
+        await db.execute("CREATE SCHEMA IF NOT EXISTS admin")
+
+        # Users table
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS users (
+                user_id         BIGINT PRIMARY KEY,
+                username        TEXT,
+                joined_at       TEXT,
+                streak          INTEGER DEFAULT 0,
+                last_active     TEXT,
+                daily_count     INTEGER DEFAULT 0,
+                daily_date      TEXT,
+                user_level      TEXT,
+                banned          INTEGER DEFAULT 0,
+                ban_reason      TEXT,
+                placement_done  INTEGER DEFAULT 0,
+                placement_score INTEGER DEFAULT 0,
+                placement_taken_at TEXT
+            )
+        """)
+
+        # word_progress table
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS word_progress (
+                id              SERIAL PRIMARY KEY,
+                user_id         BIGINT NOT NULL,
+                word            TEXT NOT NULL,
+                level           INTEGER DEFAULT 0,
+                seen            INTEGER DEFAULT 0,
+                correct         INTEGER DEFAULT 0,
+                correct_streak  INTEGER DEFAULT 0,
+                wrong           INTEGER DEFAULT 0,
+                learned         INTEGER DEFAULT 0,
+                marked_hard     INTEGER DEFAULT 0,
+                marked_know     INTEGER DEFAULT 0,
+                added_at        TEXT,
+                learned_at      TEXT,
+                next_review     TEXT,
+                ease_factor     REAL DEFAULT 2.5,
+                interval_days   INTEGER DEFAULT 0,
+                repetitions     INTEGER DEFAULT 0,
+                last_reviewed_at TEXT,
+                last_grade      TEXT,
+                UNIQUE(user_id, word),
+                FOREIGN KEY (user_id) REFERENCES users(user_id) ON DELETE CASCADE
+            )
+        """)
+
+        # sessions table
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS sessions (
+                id          SERIAL PRIMARY KEY,
+                user_id     BIGINT NOT NULL,
+                word        TEXT NOT NULL,
+                answered_at TEXT NOT NULL,
+                correct     INTEGER NOT NULL,
+                FOREIGN KEY (user_id) REFERENCES users(user_id) ON DELETE CASCADE
+            )
+        """)
+
+        # story_history table
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS story_history (
+                id          SERIAL PRIMARY KEY,
+                user_id     BIGINT NOT NULL,
+                story_date  TEXT NOT NULL,
+                genre       TEXT NOT NULL,
+                words_json  TEXT NOT NULL,
+                story_text  TEXT NOT NULL,
+                created_at  TEXT NOT NULL,
+                FOREIGN KEY (user_id) REFERENCES users(user_id) ON DELETE CASCADE
+            )
+        """)
+
+        # memory_palace_history table
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS memory_palace_history (
+                id          SERIAL PRIMARY KEY,
+                user_id     BIGINT NOT NULL,
+                palace_date TEXT NOT NULL,
+                theme       TEXT NOT NULL,
+                words_json  TEXT NOT NULL,
+                palace_text TEXT NOT NULL,
+                created_at  TEXT NOT NULL,
+                FOREIGN KEY (user_id) REFERENCES users(user_id) ON DELETE CASCADE
+            )
+        """)
+
+        # Indexes
+        await db.execute("CREATE INDEX IF NOT EXISTS idx_progress_user ON word_progress(user_id)")
+        await db.execute("CREATE INDEX IF NOT EXISTS idx_progress_review ON word_progress(user_id, next_review)")
+        await db.execute("CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id)")
+        await db.execute("CREATE INDEX IF NOT EXISTS idx_story_user_date ON story_history(user_id, story_date)")
+        await db.execute(
+            "CREATE INDEX IF NOT EXISTS idx_palace_user_date ON memory_palace_history(user_id, palace_date)"
+        )
+
+
 async def init_db():
     if USE_POSTGRES:
-        async with _db_connect() as _:
-            return
+        await _init_postgres_schema()
+        return
 
     async with _db_connect() as db:
         # Enforce foreign keys for all connections
