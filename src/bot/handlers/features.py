@@ -3,7 +3,7 @@ from aiogram import Router, F
 from aiogram.filters import Command
 from aiogram.types import Message, CallbackQuery
 
-from database import (
+from src.database.models import (
     get_today_answered_words,
     count_story_generations_today,
     count_palace_generations_today,
@@ -12,36 +12,39 @@ from database import (
     save_story_history,
     save_memory_palace_history,
 )
-from utils import (
+from src.utils.utils import (
     touch_user_from_message,
     reject_if_banned_message,
     reject_if_banned_callback,
     is_unlimited_user,
     parse_positive_int_arg,
 )
-from api_words import (
+from src.data.api_words import (
     get_word_data,
     get_ai_example_sentences,
     generate_contextual_story,
     generate_memory_palace_text,
+    get_tutor_explanation_gemini,
     extract_headword,
+    _get_http_session,
 )
-from app_state import (
+from src.core.app_state import (
     search_waiting_users,
+    explain_waiting_users,
     story_translation_overrides,
     processed_callbacks,
     register_processed_callback,
 )
-from ui import get_search_keyboard, get_story_genre_keyboard, get_palace_theme_keyboard
-from texts import format_searched_word
-from level_words import chunk_text as _chunk_text, find_word_levels
-from config import (
+from src.bot.ui import get_search_keyboard, get_story_genre_keyboard, get_palace_theme_keyboard
+from src.core.texts import format_searched_word
+from src.data.level_words import chunk_text as _chunk_text, find_word_levels
+from src.core.config import (
     DAILY_STORY_LIMIT,
     DAILY_PALACE_LIMIT,
     STORY_GENRES,
     PALACE_THEMES,
 )
-from bot_helpers import (
+from src.utils.bot_helpers import (
     _build_story_intro_text,
     _build_palace_intro_text,
     _parse_story_translation_pairs,
@@ -118,7 +121,7 @@ async def story_handler(message: Message):
 
 @router.callback_query(F.data.startswith("story:genre:"))
 async def story_callback_handler(callback: CallbackQuery):
-    from database import get_user_level # circular
+    from src.database.models import get_user_level # circular
     if await reject_if_banned_callback(callback): return
     user_id = callback.from_user.id
 
@@ -155,7 +158,7 @@ async def palace_handler(message: Message):
 
 @router.callback_query(F.data.startswith("palace:theme:"))
 async def palace_callback_handler(callback: CallbackQuery):
-    from database import get_user_level # circular
+    from src.database.models import get_user_level # circular
     if await reject_if_banned_callback(callback): return
     user_id = callback.from_user.id
 
@@ -222,3 +225,67 @@ async def story_translation_handler(message: Message):
             return
         story_translation_overrides.setdefault(user_id, {}).update(pairs)
         await message.answer("✅ Glossary թարմացվեց։")
+
+@router.callback_query(F.data.startswith("explain:"))
+async def explain_callback_handler(callback: CallbackQuery):
+    if await reject_if_banned_callback(callback): return
+    query = callback.data.split(":")[1]
+    await callback.answer("🧐 Մտածում եմ...")
+    await _process_explanation(callback.message, query)
+
+@router.callback_query(F.data.startswith("audio:"))
+async def audio_callback_handler(callback: CallbackQuery):
+    if await reject_if_banned_callback(callback): return
+    word = callback.data.split(":")[1]
+    word_data = await get_word_data(word)
+    url = word_data.get("audio_url")
+    
+    if not url:
+        await callback.answer("🔊 Արտասանությունը հասանելի չէ այս բառի համար", show_alert=True)
+        return
+        
+    await callback.answer("🔊 Ուղարկում եմ ձայնը...")
+    try:
+        await callback.message.answer_voice(url)
+    except Exception:
+        await callback.message.answer(f"🔊 Ձայնային ֆայլի հղում: {url}")
+
+@router.message(Command("explain"))
+async def explain_handler(message: Message):
+    await touch_user_from_message(message)
+    if await reject_if_banned_message(message): return
+
+    parts = (message.text or "").split(maxsplit=1)
+    if len(parts) > 1 and parts[1].strip():
+        query = parts[1].strip()
+        await _process_explanation(message, query)
+    else:
+        explain_waiting_users.add(message.from_user.id)
+        await message.answer("🧐 Ի՞նչն եք ցանկանում բացատրել (բառ, արտահայտություն կամ քերականություն)։\nՕրինակ՝ 'make vs do' կամ 'get used to':\nՉեղարկելու համար գրեք՝ cancel")
+
+@router.message(F.from_user.id.in_(explain_waiting_users) & F.text & ~F.text.startswith('/'))
+async def explain_text_handler(message: Message):
+    if await reject_if_banned_message(message): return
+    user_id = message.from_user.id
+    explain_waiting_users.discard(user_id)
+
+    text = (message.text or "").strip()
+    if text.lower() in ("cancel", "exit", "չեղարկել"):
+        await message.answer("❌ Բացատրությունը չեղարկվեց։")
+        return
+
+    await _process_explanation(message, text)
+
+async def _process_explanation(message: Message, query: str):
+    from src.database.models import get_user_level # circular
+    user_id = message.from_user.id
+    
+    await message.answer(f"🧐 Մտածում եմ `{query}`-ի մասին... ⏳")
+    
+    level = await get_user_level(user_id)
+    session = await _get_http_session()
+    
+    explanation = await get_tutor_explanation_gemini(session, query, level=level)
+    
+    for chunk in _chunk_text(explanation):
+        await message.answer(chunk, parse_mode="Markdown")

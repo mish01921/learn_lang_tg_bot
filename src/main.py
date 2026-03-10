@@ -4,18 +4,21 @@ import os
 
 from aiogram import Bot, Dispatcher
 
-from api_words import (
+from src.data.api_words import (
     close_http_session,
 )
-from config import TOKEN
-from database import (
+from src.core.config import TOKEN
+from src.database.models import (
     init_db,
 )
-import placement
-import general
-import study
-import features
-import admin
+from src.core.texts import BOT_DESCRIPTION, BOT_SHORT_DESCRIPTION
+from src.bot.handlers import (
+    placement,
+    general,
+    study,
+    features,
+    admin
+)
 
 logging.basicConfig(level=logging.INFO)
 
@@ -49,6 +52,14 @@ async def main():
         raise RuntimeError("TOKEN format looks invalid. Expected format: <id>:<secret>.")
 
     await init_db()
+
+    # Update bot profile description and short description
+    try:
+        await bot.set_my_description(BOT_DESCRIPTION)
+        await bot.set_my_short_description(BOT_SHORT_DESCRIPTION)
+        logging.info("Bot profile description updated.")
+    except Exception as e:
+        logging.error(f"Failed to set bot description: {e}")
 
     # Start the dummy web server for Render
     await start_health_check_server()

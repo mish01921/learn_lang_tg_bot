@@ -3,8 +3,20 @@ from pathlib import Path
 
 def _load_local_env() -> None:
     """Minimal .env loader to avoid external dependency in restricted environments."""
-    env_path = Path(__file__).resolve().parent / ".env"
-    if not env_path.exists():
+    # Check current dir, then one up, then two up
+    possible_paths = [
+        Path(".env"),
+        Path(__file__).resolve().parent / ".env",
+        Path(__file__).resolve().parent.parent / ".env",
+        Path(__file__).resolve().parent.parent.parent / ".env",
+    ]
+    env_path = None
+    for p in possible_paths:
+        if p.exists():
+            env_path = p
+            break
+            
+    if not env_path:
         return
     try:
         for raw_line in env_path.read_text(encoding="utf-8").splitlines():

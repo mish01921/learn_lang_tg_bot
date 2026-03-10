@@ -3,18 +3,20 @@ from aiogram.filters import BaseFilter, Command
 from aiogram.types import Message, CallbackQuery
 from datetime import datetime
 
-from config import ADMIN_USER_IDS
-from database import (
+from src.core.config import ADMIN_USER_IDS
+from src.database.models import (
     get_health_snapshot,
     get_all_users,
     get_top_leaderboard,
     set_user_ban,
     find_user_id_by_username,
     get_all_user_ids,
-    get_admin_overview
+    get_admin_overview,
+    get_user_full_profile,
+    get_user_daily_stats
 )
-from ui import get_admin_keyboard, get_admin_users_keyboard
-from utils import safe_edit_text, parse_positive_int_arg
+from src.bot.ui import get_admin_keyboard, get_admin_users_keyboard
+from src.utils.utils import safe_edit_text, parse_positive_int_arg
 
 router = Router()
 BOT_STARTED_AT = datetime.now()
@@ -177,21 +179,72 @@ async def admin_ui_handler(callback: CallbackQuery):
     
     if action == "overview":
         stats = await get_admin_overview()
+        
+        # Format Level Distribution
+        levels_text = "\n".join([f"  • {lvl}: {count}" for lvl, count in stats['levels'].items()])
+        
+        # Format Difficult Words
+        diff_text = "\n".join([f"  • {w['word']} (errors: {w['total_wrong']})" for w in stats['difficult_words']])
+        if not diff_text: diff_text = "  (No data yet)"
+
         text = (
-            f"📊 Overview\n\n"
-            f"👥 Total Users: {stats['total_users']}\n"
-            f"🆕 Joined Today: {stats['joined_today']}\n"
-            f"🟢 Active Today: {stats['active_today']}\n"
-            f"✅ Learned Words: {stats['learned_total']}\n"
-            f"🔁 Hard Words: {stats['hard_total']}"
+            f"📊 **Global Overview**\n"
+            f"━━━━━━━━━━━━━━━\n"
+            f"👥 Total Users: `{stats['total_users']}`\n"
+            f"🆕 Joined Today: `{stats['joined_today']}`\n"
+            f"🟢 Active Today: `{stats['active_today']}`\n"
+            f"✅ Learned Total: `{stats['learned_total']}`\n\n"
+            f"📈 **Level Distribution:**\n"
+            f"{levels_text}\n\n"
+            f"⚠️ **Top Difficult Words:**\n"
+            f"{diff_text}\n"
+            f"━━━━━━━━━━━━━━━"
         )
-        await safe_edit_text(callback.message, text, reply_markup=get_admin_keyboard())
+        await safe_edit_text(callback.message, text, reply_markup=get_admin_keyboard(), parse_mode="Markdown")
         await callback.answer()
 
     elif action == "users":
         limit = int(callback.data.split(":")[2]) if len(callback.data.split(":")) > 2 else 30
         users = await get_all_users(limit=limit)
         await safe_edit_text(callback.message, f"👥 Last {len(users)} Users", reply_markup=get_admin_users_keyboard(users, limit))
+        await callback.answer()
+
+    elif action == "user_profile":
+        target_id = int(callback.data.split(":")[2])
+        profile = await get_user_full_profile(target_id)
+        if not profile:
+            await callback.answer("User not found", show_alert=True)
+            return
+            
+        u = profile['info']
+        s = profile['stats']
+        daily = await get_user_daily_stats(target_id)
+        
+        username = f"@{u['username']}" if u.get('username') else "None"
+        last_active = u.get('last_active', 'Never')[:16].replace('T', ' ')
+        
+        text = (
+            f"👤 **User Profile: {target_id}**\n"
+            f"━━━━━━━━━━━━━━━\n"
+            f"📛 Username: {username}\n"
+            f"📅 Joined: `{u['joined_at'][:10]}`\n"
+            f"🕒 Last Active: `{last_active}`\n"
+            f"🏷 Level: `{(u.get('user_level') or 'A1').upper()}`\n"
+            f"🔥 Streak: `{u.get('streak', 0)}`\n"
+            f"🚫 Banned: `{'Yes' if u.get('banned') else 'No'}`\n\n"
+            f"📅 **Today's Activity:**\n"
+            f"⏱ Time Spent: `{daily['minutes_today']} min` (approx.)\n"
+            f"✅ Learned Today: `{daily['learned_today']}`\n"
+            f"👁 Answered Today: `{daily['answered_today']}`\n\n"
+            f"📊 **Learning Stats:**\n"
+            f"👁 Seen: `{s.get('seen', 0)}`\n"
+            f"✅ Learned: `{s.get('learned', 0)}`\n"
+            f"🔁 Hard: `{s.get('hard', 0)}`\n"
+            f"🎯 Accuracy: `{round(s.get('correct', 0) * 100 / (s.get('correct', 0) + s.get('wrong', 0) + 0.001))}%`\n"
+            f"━━━━━━━━━━━━━━━"
+        )
+        # We can reuse the admin keyboard or create a specific one for user moderation
+        await safe_edit_text(callback.message, text, reply_markup=get_admin_keyboard(), parse_mode="Markdown")
         await callback.answer()
 
     elif action == "top":

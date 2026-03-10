@@ -1,73 +1,48 @@
 # 🇬🇧 English Word Learning Telegram Bot
 
-Այս նախագիծը **Telegram բոտ** է, որը օգնում է օգտատերերին սովորել անգլերենի ամենաշատ օգտագործվող բառերը (A1-ից C2 մակարդակներ)՝ օգտագործելով **Spaced Repetition System (SRS)** և **Artificial Intelligence (Google Gemini)**:
+Այս նախագիծը **Telegram բոտ** է, որը օգնում է օգտատերերին սովորել անգլերենի ամենաշատ օգտագործվող բառերը (A1-ից B2 մակարդակներ)՝ օգտագործելով **Spaced Repetition System (SRS)** և **Artificial Intelligence (Google Gemini)**:
 
-Բոտը պահում է օգտատիրոջ առաջընթացը, տրամադրում է վիճակագրություն, առաջարկում է կոնտեքստային պատմություններ և ունի հզոր ադմինիստրատիվ վահանակ։
+Բոտը վերակազմավորվել է «Clean Architecture» սկզբունքով և ունի հզորացված ուսումնական ծրագիր։
 
 ## ✨ Հիմնական հնարավորություններ
 
-- **📚 Բառապաշար:** 3000+ ամենահաճախ օգտագործվող բառեր (Oxford list)՝ բաժանված ըստ CEFR մակարդակների (A1, A2, B1, B2, C1, C2):
+- **🗺 Daily Roadmap:** Անհատականացված օրվա անելիքների ցանկ (Review, New Words, AI Tasks)։
+- **🎓 Study Plans:** Ընտրեք ձեր ուսումնական տեմպը՝ **Steady Learner** կամ **Deep Focus**։
 - **🧠 Smart Learning (SRS):** Բառերի կրկնության խելացի համակարգ (Again, Hard, Good, Easy), որը հաշվարկում է հաջորդ կրկնության օրը։
 - **🤖 AI Integration (Gemini):**
-  - **Contextual Stories:** Ստեղծում է կարճ պատմություններ՝ օգտագործելով օրվա սովորած բառերը։
-  - **Memory Palace:** Ստեղծում է մնեմոնիկ տեխնիկայով տեքստեր՝ բառերը հիշելու համար։
-  - **Translations & Examples:** Ճշգրիտ թարգմանություններ և օրինակներ։
-- **📊 Վիճակագրություն:** Leaderboard, Daily Streak, սովորած բառերի քանակ և ճշգրտություն։
-- **🛡️ Admin Panel:** Օգտատերերի կառավարում, Broadcast (զանգվածային նամակներ), Ban/Unban համակարգ, առողջության ստուգում (Health check):
-- **🔐 Level System:** Մակարդակների ավտոմատ բացում (Unlock)՝ հիմնված առաջընթացի վրա, կամ Placement Test-ի միջոցով։
+  - **Interactive Practice:** Կազմեք նախադասություններ նոր բառերով, ստացեք AI վերլուծություն։
+  - **AI Coach:** Ձեր առաջընթացի անհատական վերլուծություն և մոտիվացիա։
+  - **Contextual Stories:** Կարճ պատմություններ օրվա բառերով։
+  - **Memory Palace:** Մնեմոնիկ տեխնիկաներ բառերը հիշելու համար։
+- **⏱ Pomodoro Timer:** 25 րոպեանոց կենտրոնացված աշխատանքի սեսիաներ։
+- **📊 Dashboard:** Տեսողական վիճակագրություն (Progress bars), Streak և Accuracy։
+- **🛡️ Admin Panel:** Օգտատերերի կառավարում, Daily activity tracking (time spent), Broadcast և Moderation։
 
 ## 🛠️ Տեխնոլոգիաներ
 
-- **Python 3.9+**
+- **Python 3.11+**
 - **Aiogram 3.x** (Asynchronous Telegram Bot Framework)
 - **PostgreSQL** (Տվյալների բազա)
 - **Google Gemini API** (AI գեներացիաների համար)
-- **Dictionary API** (Արտասանության և սահմանումների համար)
+- **Docker & Docker Compose** (Հեշտ տեղադրման համար)
 
-## 🚀 Տեղադրում և գործարկում
+## 🚀 Տեղադրում և գործարկում (Docker)
 
-### 1. Clone արեք ռեպոզիտորիան
+### 1. Կարգավորեք Environment փոփոխականները
 
-```bash
-git clone https://github.com/yourusername/english-bot.git
-cd english-bot
-```
-
-### 2. Ստեղծեք վիրտուալ միջավայր (Virtual Environment)
-
-Windows:
-```bash
-python -m venv venv
-venv\Scripts\activate
-```
-
-Linux/macOS:
-```bash
-python3 -m venv venv
-source venv/bin/activate
-```
-
-### 3. Տեղադրեք անհրաժեշտ գրադարանները
-
-```bash
-pip install -r requirements.txt
-```
-
-### 4. Կարգավորեք Environment փոփոխականները
-
-Ստեղծեք `.env` ֆայլ ծրագրի արմատում և լրացրեք հետևյալ տվյալները.
+Ստեղծեք `.env` ֆայլ ծրագրի արմատում․
 
 ```env
 BOT_TOKEN=your_telegram_bot_token
 GEMINI_API_KEY=your_google_gemini_api_key
-ADMIN_USER_IDS=123456789,987654321
-DATABASE_URL=postgresql+asyncpg://user:password@localhost/dbname
+ADMIN_USER_IDS=123456789
+DATABASE_URL=postgresql+asyncpg://bot_user:bot_password@db/english_bot_db
 ```
 
-### 5. Գործարկեք բոտը
+### 2. Գործարկեք Docker-ը
 
 ```bash
-python bot.py
+docker-compose up --build -d
 ```
 
 ## 📖 Օգտագործման ուղեցույց
@@ -76,51 +51,25 @@ python bot.py
 
 | Հրաման | Նկարագրություն |
 | :--- | :--- |
-| `/start` | Սկսել բոտը, տեսնել մենյուն |
-| `/word` | Ստանալ նոր բառ կամ կրկնել հինը |
-| `/review` | Տեսնել կրկնության ենթակա բառերը (Flashcards) |
-| `/learned` | Տեսնել արդեն սովորած բառերի ցանկը |
-| `/stats` | Ձեր անձնական վիճակագրությունը |
-| `/coach` | AI մարզիչ՝ խորհուրդներ և օրվա պլան |
-| `/search <word>` | Փնտրել բառ բառարանում |
-
-### AI Features
-
-| Հրաման | Նկարագրություն |
-| :--- | :--- |
-| `/story` | Գեներացնել պատմություն օրվա բառերով |
-| `/palace` | Ստեղծել Memory Palace (հիշողության սենյակ) |
-| `/example <word>` | Ստանալ AI օրինակներ բառի համար |
-
-### Admin Commands (միայն ադմինների համար)
-
-| Հրաման | Նկարագրություն |
-| :--- | :--- |
-| `/admin` | Բացել ադմին վահանակը |
-| `/users` | Տեսնել օգտատերերի ցանկը |
-| `/broadcast` | Ուղարկել հաղորդագրություն բոլորին |
-| `/ban <id>` | Արգելափակել օգտատիրոջը |
-| `/health` | Ստուգել բազայի և բոտի կարգավիճակը |
+| `/start` | Սկսել բոտը, տեսնել հիմնական մենյուն |
+| `/roadmap` | Ձեր օրվա անելիքների ցանկը (Գլխավոր էջ) |
+| `/plan` | Ուսումնական պլանի ընտրություն |
+| `/word` | Ստանալ նոր բառ |
+| `/review` | Կրկնության ենթակա բառերը (Flashcards) |
+| `/pomodoro` | Սկսել 25 րոպեանոց ֆոկուս սեսիա |
+| `/coach` | AI մարզիչի վերլուծություն |
+| `/stats` | Ձեր Dashboard-ը |
 
 ## 📂 Նախագծի կառուցվածքը
 
 ```text
-📂 english-bot/
-├── 📄 bot.py             # Entry point (Main file)
-├── 📄 database.py        # Database logic (SQLite/Postgres)
-├── 📄 api_words.py       # External APIs (Gemini, Dictionary)
-├── 📄 study.py           # Learning logic (Test, Review)
-├── 📄 features.py        # AI features (Story, Palace, Search)
-├── 📄 admin.py           # Admin panel handlers
-├── 📄 ui.py              # Keyboards & Inline buttons
-├── 📄 texts.py           # Text formatting helpers
-├── 📄 config.py          # Configuration loader
-└── 📄 requirements.txt   # Dependencies
+📂 src/
+├── 📂 bot/           # Handlers & UI logic
+├── 📂 core/          # Config, Texts, State
+├── 📂 database/      # PostgreSQL Models & Engine
+├── 📂 data/          # Static data (Words, Questions)
+└── 📂 utils/         # Helper functions
 ```
-
-## 🤝 Contributing
-
-Pull request-ները ողջունելի են։ Խոշոր փոփոխությունների համար խնդրում ենք նախապես բացել issue՝ քննարկման համար։
 
 ---
 Made with ❤️ for English Learners.

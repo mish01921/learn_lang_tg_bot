@@ -4,7 +4,7 @@ import logging
 import json
 import re
 
-from config import DATABASE_URL
+from src.core.config import DATABASE_URL
 
 ADMIN_AUDIT_TABLE = "admin.audit_log"
 ADMIN_SETTINGS_TABLE = "admin.settings"
@@ -181,9 +181,15 @@ async def _init_postgres_schema():
                 ban_reason      TEXT,
                 placement_done  INTEGER DEFAULT 0,
                 placement_score INTEGER DEFAULT 0,
-                placement_taken_at TEXT
+                placement_taken_at TEXT,
+                study_plan      TEXT DEFAULT 'steady'
             )
         """)
+        # Migration
+        try:
+            await db.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS study_plan TEXT DEFAULT 'steady'")
+        except Exception:
+            pass
 
         # word_progress table
         await db.execute("""
@@ -325,6 +331,38 @@ async def update_streak(user_id: int):
             UPDATE users SET streak = ?, last_active = ? WHERE user_id = ?
         """, (new_streak, now.isoformat(), user_id))
         await db.commit()
+
+
+async def set_user_plan(user_id: int, plan: str):
+    if plan not in {"steady", "deep"}:
+        return
+    async with _db_connect() as db:
+        await db.execute("UPDATE users SET study_plan = ? WHERE user_id = ?", (plan, user_id))
+        await db.commit()
+
+
+async def get_user_plan(user_id: int) -> str:
+    async with _db_connect() as db:
+        db.row_factory = asyncpg.Record
+        async with db.execute("SELECT study_plan FROM users WHERE user_id = ?", (user_id,)) as cur:
+            row = await cur.fetchone()
+    return row["study_plan"] if row and row["study_plan"] else "steady"
+
+
+async def set_user_plan(user_id: int, plan: str):
+    if plan not in {"steady", "deep"}:
+        return
+    async with _db_connect() as db:
+        await db.execute("UPDATE users SET study_plan = ? WHERE user_id = ?", (plan, user_id))
+        await db.commit()
+
+
+async def get_user_plan(user_id: int) -> str:
+    async with _db_connect() as db:
+        db.row_factory = asyncpg.Record
+        async with db.execute("SELECT study_plan FROM users WHERE user_id = ?", (user_id,)) as cur:
+            row = await cur.fetchone()
+    return row["study_plan"] if row and row["study_plan"] else "steady"
 
 
 # ═══════════════════════════════════════════════════════
@@ -1162,28 +1200,119 @@ async def get_admin_overview() -> dict:
             total_users = int((await cur.fetchone())["c"])
 
         async with db.execute(
-            "SELECT COUNT(*) AS c FROM users WHERE date(joined_at) = date('now')"
+            "SELECT COUNT(*) AS c FROM users WHERE substr(joined_at, 1, 10) = substr(CURRENT_TIMESTAMP::text, 1, 10)"
         ) as cur:
-            joined_today = int((await cur.fetchone())["c"])
+            row = await cur.fetchone()
+            joined_today = int(row["c"] if row else 0)
 
         async with db.execute(
-            "SELECT COUNT(*) AS c FROM users WHERE date(last_active) = date('now')"
+            "SELECT COUNT(*) AS c FROM users WHERE substr(last_active, 1, 10) = substr(CURRENT_TIMESTAMP::text, 1, 10)"
         ) as cur:
-            active_today = int((await cur.fetchone())["c"])
+            row = await cur.fetchone()
+            active_today = int(row["c"] if row else 0)
 
         async with db.execute("SELECT COUNT(*) AS c FROM word_progress WHERE learned = 1") as cur:
             learned_total = int((await cur.fetchone())["c"])
 
-        async with db.execute("SELECT COUNT(*) AS c FROM word_progress WHERE marked_hard = 1") as cur:
-            hard_total = int((await cur.fetchone())["c"])
+        # Difficult words (global top 5)
+        async with db.execute("""
+            SELECT word, SUM(wrong) as total_wrong, SUM(correct) as total_correct
+            FROM word_progress
+            GROUP BY word
+            HAVING SUM(wrong) > 0
+            ORDER BY (SUM(wrong) - SUM(correct)) DESC
+            LIMIT 5
+        """) as cur:
+            diff_rows = await cur.fetchall()
+            difficult_words = [dict(r) for r in diff_rows]
+
+        # Level distribution
+        async with db.execute("""
+            SELECT COALESCE(user_level, 'A1') as lvl, COUNT(*) as c
+            FROM users
+            GROUP BY lvl
+            ORDER BY lvl ASC
+        """) as cur:
+            lvl_rows = await cur.fetchall()
+            levels = {r['lvl']: r['c'] for r in lvl_rows}
 
     return {
         "total_users": total_users,
         "joined_today": joined_today,
         "active_today": active_today,
         "learned_total": learned_total,
-        "hard_total": hard_total,
+        "difficult_words": difficult_words,
+        "levels": levels
     }
+
+
+async def get_user_daily_stats(user_id: int) -> dict:
+    today = datetime.now().date().isoformat()
+    async with _db_connect() as db:
+        db.row_factory = asyncpg.Record
+        # Count words answered today
+        async with db.execute(
+            "SELECT COUNT(*) as c FROM sessions WHERE user_id = ? AND substr(answered_at, 1, 10) = ?",
+            (user_id, today)
+        ) as cur:
+            row = await cur.fetchone()
+            answered_today = int(row["c"] if row else 0)
+
+        # Count words MARKED AS LEARNED today
+        async with db.execute(
+            "SELECT COUNT(*) as c FROM word_progress WHERE user_id = ? AND substr(learned_at, 1, 10) = ?",
+            (user_id, today)
+        ) as cur:
+            row = await cur.fetchone()
+            learned_today = int(row["c"] if row else 0)
+
+        # Estimate time spent (based on session gaps, simplified)
+        async with db.execute(
+            "SELECT MIN(answered_at) as first, MAX(answered_at) as last FROM sessions WHERE user_id = ? AND substr(answered_at, 1, 10) = ?",
+            (user_id, today)
+        ) as cur:
+            row = await cur.fetchone()
+            if row and row["first"] and row["last"]:
+                start = datetime.fromisoformat(row["first"])
+                end = datetime.fromisoformat(row["last"])
+                diff = end - start
+                minutes = round(diff.total_seconds() / 60)
+            else:
+                minutes = 0
+
+    return {
+        "answered_today": answered_today,
+        "learned_today": learned_today,
+        "minutes_today": minutes
+    }
+
+
+async def get_user_full_profile(user_id: int) -> dict | None:
+    async with _db_connect() as db:
+        db.row_factory = asyncpg.Record
+        async with db.execute("""
+            SELECT * FROM users WHERE user_id = ?
+        """, (user_id,)) as cur:
+            user = await cur.fetchone()
+        
+        if not user:
+            return None
+            
+        async with db.execute("""
+            SELECT 
+                COUNT(*) as seen,
+                SUM(marked_know) as learned,
+                SUM(marked_hard) as hard,
+                SUM(correct) as correct,
+                SUM(wrong) as wrong
+            FROM word_progress WHERE user_id = ?
+        """, (user_id,)) as cur:
+            prog = await cur.fetchone()
+            
+        return {
+            "info": dict(user),
+            "stats": dict(prog) if prog else {}
+        }
 
 
 async def get_health_snapshot() -> dict:

@@ -3,11 +3,11 @@ from aiogram import Router, F
 from aiogram.filters import Command
 from aiogram.types import Message, CallbackQuery
 
-from database import is_placement_done, get_user_level, set_placement_result
-from ui import get_placement_start_keyboard, get_placement_options_keyboard
-from app_state import placement_sessions
-from placement_questions import CEFR_PLACEMENT_QUESTIONS
-from utils import (
+from src.database.models import is_placement_done, get_user_level, set_placement_result
+from src.bot.ui import get_placement_start_keyboard, get_placement_options_keyboard
+from src.core.app_state import placement_sessions
+from src.data.placement_questions import CEFR_PLACEMENT_QUESTIONS
+from src.utils.utils import (
     touch_user_from_message,
     reject_if_banned_message,
     reject_if_banned_callback,

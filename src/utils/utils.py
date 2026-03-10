@@ -1,12 +1,12 @@
 from aiogram.types import Message, CallbackQuery
 from aiogram.exceptions import TelegramBadRequest
-from config import ADMIN_USER_IDS
-from database import ensure_user, is_banned
+from src.core.config import ADMIN_USER_IDS
+from src.database.models import ensure_user, is_banned
 
-async def safe_edit_text(message: Message, text: str, reply_markup=None) -> bool:
+async def safe_edit_text(message: Message, text: str, reply_markup=None, **kwargs) -> bool:
     """Edit message safely; ignore Telegram 'message is not modified' noise."""
     try:
-        await message.edit_text(text, reply_markup=reply_markup)
+        await message.edit_text(text, reply_markup=reply_markup, **kwargs)
         return True
     except TelegramBadRequest as e:
         if "message is not modified" in str(e).lower():

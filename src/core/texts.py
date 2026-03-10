@@ -47,6 +47,20 @@ def format_date(iso_str: str) -> str:
         return ""
 
 
+BOT_DESCRIPTION = (
+    "🚀 Պատրա՞ստ ես փոխել կյանքդ՝ սովորելով անգլերեն։\n\n"
+    "Այս բոտը քո անձնական AI մարզիչն է, որը կօգնի քեզ տիրապետել Oxford-ի 3000 ամենակարևոր բառերին։\n\n"
+    "✨ Ինչո՞ւ ընտրել մեզ.\n"
+    "🔹 Spaced Repetition (SRS) — հիշիր բառերը ընդմիշտ, ոչ թե մեկ օրով։\n"
+    "🔹 AI Tutor (Gemini) — ստացիր խորացված բացատրություններ և օրինակներ։\n"
+    "🔹 Contextual Stories — սովորիր բառերը հետաքրքիր պատմությունների միջոցով։\n"
+    "🔹 Placement Test — սկսիր հենց քո մակարդակից (A1-B2)։\n\n"
+    "💡 Հիշիր՝ ամեն մեծ ճանապարհ սկսվում է մեկ բառից։ Սկսիր հենց հիմա։ 👇"
+)
+
+BOT_SHORT_DESCRIPTION = "Սովորիր անգլերեն Oxford-ի բառերով և AI մարզիչի օգնությամբ։ 🚀"
+
+
 def build_start_text(name: str, total_words: int, daily_limit: int, is_admin: bool = False) -> str:
     daily_line = f"🗓 Ամեն օր {daily_limit} նոր բառ"
     if is_admin:
@@ -72,6 +86,7 @@ def build_start_text(name: str, total_words: int, daily_limit: int, is_admin: bo
         f"/test — խառը թեստ անցած բառերով 🧪\n"
         f"/search — փնտրել կոնկրետ բառ 🔎\n"
         f"/example — AI example նախադասություններ 🧠\n"
+        f"/explain — AI խորացված բացատրիչ (Tutor Mode) 🧐\n"
         f"/story — contextual պատմություն օրվա բառերով 📖\n"
         f"/story_tr — story glossary custom թարգմանություններ 📘\n"
         f"/story_history [limit] — վերջին պատմությունները 📚\n"

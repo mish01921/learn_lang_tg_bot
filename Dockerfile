@@ -19,5 +19,8 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copy the rest of the application code
 COPY . /app/
 
-# Run bot.py when the container launches
-CMD ["python", "bot.py"]
+# Set PYTHONPATH so 'src' can be imported correctly
+ENV PYTHONPATH=/app
+
+# Run src/main.py when the container launches
+CMD ["python", "src/main.py"]

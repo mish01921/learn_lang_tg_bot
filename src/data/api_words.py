@@ -1,12 +1,13 @@
 import aiohttp
-from config import GEMINI_API_KEY
+from src.core.config import GEMINI_API_KEY
 import asyncio
 import logging
 import re
 from datetime import datetime, timedelta
 from typing import Optional, Dict, Any
+from pathlib import Path
 try:
-    from config import GOOGLE_TRANSLATE_API_KEY
+    from src.core.config import GOOGLE_TRANSLATE_API_KEY
 except Exception:
     GOOGLE_TRANSLATE_API_KEY = ""
 
@@ -142,7 +143,7 @@ def _load_words_from_file(path: str) -> list[str]:
 
 # Բեռնել լրացուցիչ բառեր ֆայլից
 # Տեղադրեք բառերի ցանկը տող առ տող այստեղ՝ common_words.txt
-_EXTRA_WORDS_FILE = "common_words.txt"
+_EXTRA_WORDS_FILE = str(Path(__file__).parent / "common_words.txt")
 # Մակարդակային գլխագրերը պետք է անտեսվեն COMMON_WORDS-ի համար
 _LEVEL_HEADERS = {"A1", "A2", "B1", "B2"}
 _raw_file_words = _load_words_from_file(_EXTRA_WORDS_FILE)
@@ -748,3 +749,81 @@ async def get_ai_example_sentences(word: str, count: int = 3, level: str = "A2")
     fallback = _fallback_examples(normalized_word)[:count]
     _set_cached_examples(normalized_word, fallback)
     return fallback
+
+
+async def get_tutor_explanation_gemini(session: aiohttp.ClientSession, query: str, level: str = "B1") -> str:
+    """Gemini-powered English tutor explanation for words, phrases, or grammar."""
+    if _network_temporarily_blocked():
+        return "⚠️ Network is temporarily blocked. Please try again later."
+    if not GEMINI_API_KEY:
+        return "⚠️ Gemini API key is not configured."
+
+    url = (
+        f"https://generativelanguage.googleapis.com/v1/models/"
+        f"gemini-2.5-flash-lite:generateContent?key={GEMINI_API_KEY}"
+    )
+    
+    level = (level or "B1").upper()
+    
+    prompt = (
+        "You are a friendly and expert English Tutor (Tutor Mode).\n"
+        f"The student (Level: {level}) wants an explanation for: '{query}'.\n\n"
+        "Structure your response exactly like this for Telegram Markdown:\n\n"
+        "🧐 **Tutor Explanation: " + query + "**\n"
+        "━━━━━━━━━━━━━━━\n\n"
+        "📌 **Համառոտ (Summary)**\n"
+        "[1-2 sentence brief Armenian summary]\n\n"
+        "💡 **Detailed Explanation (English)**\n"
+        "[Thorough English explanation for CEFR " + level + "]\n\n"
+        "🇦🇲 **Մանրամասն Բացատրություն (Armenian)**\n"
+        "[Full Armenian translation of the above English part]\n\n"
+        "💬 **Examples / Օրինակներ**\n"
+        "• `English Example sentence` — *Հայերեն թարգմանություն*\n"
+        "• `English Example sentence` — *Հայերեն թարգմանություն*\n\n"
+        "━━━━━━━━━━━━━━━\n"
+        "✨ *Keep practicing! / Շարունակիր պարապել:* \n\n"
+        "Rules:\n"
+        "- Use **bold** for section headers and key terms.\n"
+        "- Use `fixed-width code` for the target word or English examples.\n"
+        "- Use *italic* for translations.\n"
+        "- Use separators like ━━━━━━━━━━━━━━━.\n"
+        "- If comparing ('A vs B'), use a clear comparison list."
+    )
+
+    payload = {
+        "contents": [
+            {
+                "parts": [
+                    {
+                        "text": prompt
+                    }
+                ]
+            }
+        ]
+    }
+
+    timeout = aiohttp.ClientTimeout(total=15)
+    for attempt in range(2):
+        try:
+            async with session.post(url, json=payload, timeout=timeout) as res:
+                if res.status != 200:
+                    logging.warning("Gemini Tutor API non-200 status: %s", res.status)
+                    continue
+                data = await res.json()
+                candidates = data.get("candidates") or []
+                if not candidates:
+                    continue
+                content = candidates[0].get("content") or {}
+                parts = content.get("parts") or []
+                if not parts:
+                    continue
+                text = parts[0].get("text", "").strip()
+                return text if text else "⚠️ Could not generate an explanation."
+        except aiohttp.ClientConnectorError:
+            _mark_network_blocked()
+            return "⚠️ Network connection error."
+        except Exception:
+            logging.exception("Gemini Tutor request failed (attempt %s)", attempt + 1)
+            await asyncio.sleep(0.5 * (attempt + 1))
+            
+    return "⚠️ Sorry, I'm having trouble connecting to my knowledge base right now."

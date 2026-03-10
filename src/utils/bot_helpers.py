@@ -1,10 +1,10 @@
 import asyncio
 from aiogram.types import Message, CallbackQuery
 
-from api_words import get_word_data, COMMON_WORDS
-from app_state import last_presented_words, review_sessions, story_translation_overrides
-from config import DAILY_LIMIT, WORD_LEVEL_CHOICES
-from database import (
+from src.data.api_words import get_word_data, COMMON_WORDS
+from src.core.app_state import last_presented_words, review_sessions, story_translation_overrides
+from src.core.config import DAILY_LIMIT, WORD_LEVEL_CHOICES
+from src.database.models import (
     get_daily_count,
     get_next_word,
     get_word_reason,
@@ -13,10 +13,10 @@ from database import (
     set_user_level,
     get_hard_words,
 )
-from level_words import load_levelled_words as _load_levelled_words, extract_headword as _extract_headword
-from texts import format_word, format_date
-from ui import get_word_keyboard, get_story_genre_keyboard, get_review_start_keyboard, get_review_flashcard_keyboard
-from utils import safe_edit_text
+from src.data.level_words import load_levelled_words as _load_levelled_words, extract_headword as _extract_headword
+from src.core.texts import format_word, format_date
+from src.bot.ui import get_word_keyboard, get_story_genre_keyboard, get_review_start_keyboard, get_review_flashcard_keyboard
+from src.utils.utils import safe_edit_text
 
 
 def _next_level(level: str) -> str | None:
@@ -125,7 +125,7 @@ async def _build_story_glossary_text(words: list[str], user_id: int | None = Non
 
 
 async def send_next_word_card(message: Message | CallbackQuery, user_id: int, level: str) -> bool:
-    from utils import is_unlimited_user  # circular
+    from src.utils.utils import is_unlimited_user  # circular
     msg_target = message.message if isinstance(message, CallbackQuery) else message
 
     daily_count = await get_daily_count(user_id)
@@ -199,9 +199,23 @@ async def send_review_list(message: Message, user_id: int) -> bool:
     review_sessions[user_id] = {"words": words_only, "index": 0, "show_translation": False, "show_example": False}
 
     lines = [f"{i}. {w['word']}  [{_grade_tag(w.get('last_grade') or 'hard')}] ({format_date(w.get('added_at', ''))})" for i, w in enumerate(words, 1)]
+    
+    guide = (
+        "💡 **Ինչպե՞ս գնահատել.**\n"
+        "❌ **Again**: Չհիշեցի (կրկնել շուտով)\n"
+        "🟠 **Hard**: Դժվարությամբ (1-2 օրից)\n"
+        "✅ **Good**: Լավ հիշում եմ (3-4 օրից)\n"
+        "🚀 **Easy**: Շատ հեշտ էր (7-10 օրից)\n"
+    )
+
+    lines_text = "\n".join(lines)
     await message.answer(
-        "📘 Review բառերի ցանկ\n\n" + "\n".join(lines) + "\n\nՍեղմեք «🔁 Կրկնել (Flashcards)»։",
+        f"📘 **Review բառերի ցանկ**\n\n" 
+        f"{lines_text}\n\n"
+        f"{guide}\n"
+        f"Սեղմեք «🔁 Կրկնել (Flashcards)»։",
         reply_markup=get_review_start_keyboard(),
+        parse_mode="Markdown"
     )
     return True
 

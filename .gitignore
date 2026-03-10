@@ -21,3 +21,5 @@ env/
 .vscode/
 .idea/
 .DS_Store
+KNOWLEDGE_BASE.md
+PROJECT_STRUCTURE.md

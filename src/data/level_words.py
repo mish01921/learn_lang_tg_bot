@@ -2,7 +2,9 @@ import logging
 import os
 import re
 
-COMMON_WORDS_FILE = "common_words.txt"
+from pathlib import Path
+
+COMMON_WORDS_FILE = str(Path(__file__).parent / "common_words.txt")
 LEVEL_KEYS = ("A1", "A2", "B1", "B2")
 
 _level_words_cache: dict | None = None

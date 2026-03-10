@@ -3,10 +3,10 @@ import tempfile
 import unittest
 from datetime import datetime, timedelta
 
-import bot
-import database
-import level_words
-import texts
+import src.main as bot
+import src.database.models as database
+import src.data.level_words as level_words
+import src.core.texts as texts
 
 
 class TestBotParsing(unittest.TestCase):
