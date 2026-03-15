@@ -12,7 +12,7 @@ from src.bot.ui import (
     get_search_keyboard,
 )
 from src.core.config import DAILY_LIMIT, WORD_LEVEL_CHOICES
-from src.core.texts import build_start_text
+from src.core.texts import build_start_text, HELP_TEXT
 from src.data.api_words import COMMON_WORDS
 from src.data.level_words import chunk_text as _chunk_text
 from src.data.level_words import load_levelled_words as _load_levelled_words
@@ -347,6 +347,14 @@ async def plan_callback_handler(callback: CallbackQuery):
     elif action == "roadmap":
         await roadmap_command_handler(callback.message)
         await callback.answer()
+
+@router.message(Command("help"))
+@router.message(F.text.lower().contains("help"))
+async def help_handler(message: Message):
+    await touch_user_from_message(message)
+    if await reject_if_banned_message(message):
+        return
+    await message.answer(HELP_TEXT, parse_mode="HTML")
 
 @router.message(F.text.in_({"🗺 Roadmap", "Roadmap", "/roadmap"}))
 async def roadmap_button_handler(message: Message):

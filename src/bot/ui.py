@@ -12,7 +12,7 @@ def get_main_menu_keyboard() -> ReplyKeyboardMarkup:
         keyboard=[
             [KeyboardButton(text="🗺 Roadmap"), KeyboardButton(text="👨‍🏫 Coach")],
             [KeyboardButton(text="🆕 New Word"), KeyboardButton(text="⏱ Pomodoro")],
-            [KeyboardButton(text="📊 Stats")],
+            [KeyboardButton(text="📊 Stats"), KeyboardButton(text="❓ Help")],
         ],
         resize_keyboard=True,
         persistent=True

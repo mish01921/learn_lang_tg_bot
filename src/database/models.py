@@ -324,10 +324,21 @@ async def update_streak(user_id: int):
 
         now = datetime.now()
         today = now.date()
-        last = datetime.fromisoformat(row["last_active"]).date() if row["last_active"] else None
+        
+        last_active_str = row["last_active"]
+        if not last_active_str:
+            # First time activity
+            await db.execute(
+                "UPDATE users SET streak = 1, last_active = ? WHERE user_id = ?",
+                (now.isoformat(), user_id),
+            )
+            await db.commit()
+            return
+
+        last = datetime.fromisoformat(last_active_str).date()
 
         if last == today:
-            # Keep last_active fresh on every interaction in the same day.
+            # Already active today, just refresh the timestamp
             await db.execute(
                 "UPDATE users SET last_active = ? WHERE user_id = ?",
                 (now.isoformat(), user_id),
@@ -335,7 +346,15 @@ async def update_streak(user_id: int):
             await db.commit()
             return
 
-        new_streak = 1 if (last is None or (today - last).days > 1) else row["streak"] + 1
+        # If last activity was yesterday
+        if (today - last).days == 1:
+            new_streak = row["streak"] + 1
+        elif (today - last).days > 1:
+            # Streak broken
+            new_streak = 1
+        else:
+            # This handles cases where 'today' might be somehow before 'last' (rare clock issues)
+            new_streak = row["streak"]
 
         await db.execute("""
             UPDATE users SET streak = ?, last_active = ? WHERE user_id = ?

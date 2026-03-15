@@ -15,8 +15,13 @@ async def safe_edit_text(message: Message, text: str, reply_markup=None, **kwarg
             return False
         raise
 
+import logging
+
 def is_unlimited_user(user_id: int) -> bool:
-    return user_id in ADMIN_USER_IDS
+    is_admin = user_id in ADMIN_USER_IDS
+    if not is_admin:
+        logging.debug(f"User {user_id} is NOT in admin list: {ADMIN_USER_IDS}")
+    return is_admin
 
 async def touch_user_from_message(message: Message):
     if not message.from_user:

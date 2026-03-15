@@ -239,10 +239,10 @@ async def admin_ui_handler(callback: CallbackQuery):
             f"✅ Learned Today: `{daily['learned_today']}`\n"
             f"👁 Answered Today: `{daily['answered_today']}`\n\n"
             f"📊 **Learning Stats:**\n"
-            f"👁 Seen: `{s.get('seen', 0)}`\n"
-            f"✅ Learned: `{s.get('learned', 0)}`\n"
-            f"🔁 Hard: `{s.get('hard', 0)}`\n"
-            f"🎯 Accuracy: `{round(s.get('correct', 0) * 100 / (s.get('correct', 0) + s.get('wrong', 0) + 0.001))}%`\n"
+            f"👁 Seen: `{s.get('seen') or 0}`\n"
+            f"✅ Learned: `{s.get('learned') or 0}`\n"
+            f"🔁 Hard: `{s.get('hard') or 0}`\n"
+            f"🎯 Accuracy: `{round((s.get('correct') or 0) * 100 / ((s.get('correct') or 0) + (s.get('wrong') or 0) + 0.001))}%`\n"
             f"━━━━━━━━━━━━━━━"
         )
         # We can reuse the admin keyboard or create a specific one for user moderation
