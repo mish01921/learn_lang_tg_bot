@@ -133,8 +133,8 @@ async def verify_pronunciation_with_ai(bot: Bot, message: Message, target_word: 
             if not text:
                 return await status_msg.edit_text("⚠️ Պատասխան չստացվեց։")
 
-            # Try to extract score (look for numbers like 95/100 or just 95)
-            # regex looks for patterns like 95/100 or 95 in the first 200 chars
+            # Try to extract score (look for numbers like 85/100 or just 85)
+            # regex looks for patterns like 85/100 or 85 in the first 200 chars
             score_match = re.search(r"(\d{1,3})\s*/\s*100", text) or re.search(r"(\d{1,3})", text[:200])
             score = 0
             if score_match:

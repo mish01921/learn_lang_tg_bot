@@ -259,8 +259,8 @@ def get_pronunciation_feedback_keyboard(word: str, score: int) -> InlineKeyboard
     # Add YouGlish button for visual aid
     buttons.append(InlineKeyboardButton(text="📺 See Video", url=f"https://youglish.com/pronounce/{word}/english"))
     
-    # Show "Next Word" only if score is 95 or higher
-    if score >= 95:
+    # Show "Next Word" only if score is 85 or higher
+    if score >= 85:
         buttons.append(InlineKeyboardButton(text="⏭️ Next Word", callback_data="word:next"))
     
     return InlineKeyboardMarkup(inline_keyboard=[buttons])

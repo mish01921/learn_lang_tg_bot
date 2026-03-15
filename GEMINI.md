@@ -17,7 +17,7 @@ The bot uses **Gemini 1.5 Flash** (or higher) to analyze user-recorded voice mes
   - **Articulation Guide:** Physical instructions for tongue position, mouth shape, and airflow.
 
 - **Conditional Logic:** 
-  - If the user achieves a score of **95+**, the "Next Word" button is displayed to encourage progress.
+  - If the user achieves a score of **85+**, the "Next Word" button is displayed to encourage progress.
   - Otherwise, only the "Try Again" button is shown.
 
 ## 🗣️ Interactive Practice
