@@ -1,60 +1,53 @@
 import asyncio
 import random
-import logging
 from datetime import datetime
 
-from aiogram import Router, F
+from aiogram import F, Router
 from aiogram.filters import Command
-from aiogram.types import Message, CallbackQuery
+from aiogram.types import CallbackQuery, Message
 
-from src.database.models import (
-    is_placement_done,
-    get_seen_words,
-    get_learned_words,
-    get_hard_words,
-    record_answer,
-    increment_daily,
-    mark_word_learned,
-)
-from src.utils.utils import (
-    touch_user_from_message,
-    reject_if_banned_message,
-    reject_if_banned_callback,
-    is_unlimited_user,
-    safe_edit_text,
+from src.bot.ui import (
+    get_placement_start_keyboard,
+    get_pomodoro_keyboard,
+    get_test_options_keyboard,
 )
 from src.core.app_state import (
-    processed_callbacks,
-    user_locks,
-    test_sessions,
-    review_sessions,
-    register_processed_callback,
-    practice_waiting_users,
     pomodoro_sessions,
-)
-from src.bot.ui import (
-    get_test_options_keyboard,
-    get_review_start_keyboard,
-    get_review_flashcard_keyboard,
-    get_placement_start_keyboard,
-    get_pomodoro_keyboard
+    practice_waiting_users,
+    pronunciation_waiting_users,
+    processed_callbacks,
+    register_processed_callback,
+    review_sessions,
+    test_sessions,
 )
 from src.data.api_words import (
-    get_word_data,
     COMMON_WORDS,
-    get_ai_example_sentences,
+    _get_http_session,
     get_tutor_explanation_gemini,
-    _get_http_session
+    get_word_data,
+)
+from src.utils.audio import send_word_pronunciation, verify_pronunciation_with_ai
+from src.database.models import (
+    get_learned_words,
+    get_seen_words,
+    increment_daily,
+    is_placement_done,
+    record_answer,
 )
 from src.utils.bot_helpers import (
+    _edit_review_flashcard,
+    _grade_tag,
     maybe_promote_level,
     send_next_word_card,
     send_review_list,
-    _build_review_flashcard_text,
-    _edit_review_flashcard,
-    _grade_tag,
 )
-from src.data.level_words import find_word_levels
+from src.utils.utils import (
+    is_unlimited_user,
+    reject_if_banned_callback,
+    reject_if_banned_message,
+    safe_edit_text,
+    touch_user_from_message,
+)
 
 router = Router()
 
@@ -104,7 +97,8 @@ async def send_word_handler(message: Message):
 
 @router.callback_query(F.data.startswith("word:"))
 async def word_callback_handler(callback: CallbackQuery):
-    if await reject_if_banned_callback(callback): return
+    if await reject_if_banned_callback(callback):
+        return
     user_id = callback.from_user.id
 
     if callback.id in processed_callbacks:
@@ -114,7 +108,7 @@ async def word_callback_handler(callback: CallbackQuery):
 
     parts = callback.data.split(":")
     action = parts[1]
-    
+
     if action in {"again", "hard", "good", "easy"}:
         word = parts[2]
         await record_answer(user_id, word, correct=(action in {"hard", "good", "easy"}), grade=action)
@@ -132,18 +126,25 @@ async def word_callback_handler(callback: CallbackQuery):
         await callback.message.answer(f"🧠 **Interactive Task:**\nԿազմիր նախադասություն «**{word}**» բառով։\nԵս կստուգեմ այն և կտամ խորհուրդներ։")
         await callback.answer()
 
+    elif action == "pronounce":
+        word = parts[2]
+        pronunciation_waiting_users[user_id] = word
+        await callback.message.answer(f"🎙️ **Pronunciation Task:**\nԽնդրում եմ արտասանել «**{word}**» բառը ձայնային հաղորդագրությամբ (Voice)։\nԵս կվերլուծեմ քո արտասանությունը ELSA-ի նման։")
+        await callback.answer()
+
 
 @router.message(Command("pomodoro"))
 async def pomodoro_command_handler(message: Message):
     await touch_user_from_message(message)
-    if await reject_if_banned_message(message): return
+    if await reject_if_banned_message(message):
+        return
     user_id = message.from_user.id
-    
+
     if user_id in pomodoro_sessions:
         # Show existing session instead of start screen
         elapsed = datetime.now() - pomodoro_sessions[user_id]
         remaining_seconds = max(0, int(25 * 60 - elapsed.total_seconds()))
-        
+
         if remaining_seconds > 0:
             mins, secs = divmod(remaining_seconds, 60)
             time_str = f"{mins:02d}:{secs:02d}"
@@ -167,7 +168,7 @@ async def pomodoro_command_handler(message: Message):
 async def pomodoro_callback_handler(callback: CallbackQuery):
     action = callback.data.split(":")[1]
     user_id = callback.from_user.id
-    
+
     if action == "start":
         start_time = datetime.now()
         pomodoro_sessions[user_id] = start_time
@@ -179,19 +180,20 @@ async def pomodoro_callback_handler(callback: CallbackQuery):
             reply_markup=get_pomodoro_keyboard(is_active=True)
         )
         await callback.answer()
-        
+
         async def alert_after_focus():
             await asyncio.sleep(25 * 60)
             if user_id in pomodoro_sessions and pomodoro_sessions[user_id] == start_time:
                 try:
                     await callback.bot.send_message(
-                        user_id, 
+                        user_id,
                         "🔔 **Ժամանակն ավարտվեց!**\n\n"
                         "Հիանալի աշխատանք։ Հիմա հանգստացիր 5 րոպե (Break), ապա կարող ես սկսել նորից։",
                         reply_markup=get_pomodoro_keyboard(is_active=False)
                     )
                     del pomodoro_sessions[user_id]
-                except Exception: pass
+                except Exception:
+                    pass
         asyncio.create_task(alert_after_focus())
 
     elif action == "refresh":
@@ -199,17 +201,17 @@ async def pomodoro_callback_handler(callback: CallbackQuery):
             await safe_edit_text(callback.message, "⏱ Session-ը ակտիվ չէ։", reply_markup=get_pomodoro_keyboard())
             await callback.answer()
             return
-            
+
         elapsed = datetime.now() - pomodoro_sessions[user_id]
         remaining_seconds = max(0, int(25 * 60 - elapsed.total_seconds()))
-        
+
         if remaining_seconds == 0:
             await callback.answer("⏳ Ժամանակը գրեթե սպառվել է։")
             return
-            
+
         mins, secs = divmod(remaining_seconds, 60)
         time_str = f"{mins:02d}:{secs:02d}"
-        
+
         await safe_edit_text(
             callback.message,
             f"🚀 **Focus Session-ը ընթացքի մեջ է:**\n\n"
@@ -231,9 +233,9 @@ async def practice_message_handler(message: Message):
     user_id = message.from_user.id
     word = practice_waiting_users[user_id]
     del practice_waiting_users[user_id]
-    
+
     msg = await message.answer("🧐 Վերլուծում եմ քո նախադասությունը...")
-    
+
     prompt = (
         f"You are an expert English teacher. The student is practicing the word '{word}'. "
         f"They wrote this sentence: '{message.text}'. "
@@ -244,7 +246,7 @@ async def practice_message_handler(message: Message):
         f"4. Give overall feedback and encouragement.\n"
         f"Respond in Armenian, but keep the English examples clearly visible."
     )
-    
+
     session = await _get_http_session()
     response = await get_tutor_explanation_gemini(session, prompt)
     await msg.edit_text(f"📝 **Իմ վերլուծությունը:**\n\n{response}", parse_mode="Markdown")
@@ -253,7 +255,8 @@ async def practice_message_handler(message: Message):
 @router.message(Command("review"))
 async def review_handler(message: Message):
     await touch_user_from_message(message)
-    if await reject_if_banned_message(message): return
+    if await reject_if_banned_message(message):
+        return
     await send_review_list(message, message.from_user.id)
 
 
@@ -261,7 +264,8 @@ async def review_handler(message: Message):
 async def learned_handler(message: Message):
     from src.core.texts import format_date
     await touch_user_from_message(message)
-    if await reject_if_banned_message(message): return
+    if await reject_if_banned_message(message):
+        return
     words = await get_learned_words(message.from_user.id)
     if not words:
         await message.answer("📚 Դեռ սովորած բառեր չկան։ Սկսիր /word ✨")
@@ -272,17 +276,18 @@ async def learned_handler(message: Message):
 
 @router.callback_query(F.data.startswith("review:"))
 async def review_flashcard_handler(callback: CallbackQuery):
-    if await reject_if_banned_callback(callback): return
+    if await reject_if_banned_callback(callback):
+        return
     user_id = callback.from_user.id
     if callback.id in processed_callbacks:
         await callback.answer()
         return
     register_processed_callback(callback.id)
-    
+
     parts = callback.data.split(":")
     action = parts[1]
     session = review_sessions.get(user_id)
-    
+
     if action == "start":
         if not session:
             await send_review_list(callback.message, user_id)
@@ -292,12 +297,12 @@ async def review_flashcard_handler(callback: CallbackQuery):
         await _edit_review_flashcard(callback.message, user_id)
         await callback.answer()
         return
-    
+
     # Handle show_tr, show_ex, next
     if not session:
         await callback.answer("Session չկա։", show_alert=True)
         return
-        
+
     if action == "show_tr":
         session["show_translation"] = True
     elif action == "show_ex":
@@ -313,7 +318,7 @@ async def review_flashcard_handler(callback: CallbackQuery):
         session["index"] += 1
         session["show_translation"] = False
         session["show_example"] = False
-        
+
     await _edit_review_flashcard(callback.message, user_id)
     await callback.answer()
 
@@ -322,7 +327,8 @@ async def review_flashcard_handler(callback: CallbackQuery):
 async def test_handler(message: Message):
     user_id = message.from_user.id
     await touch_user_from_message(message)
-    if await reject_if_banned_message(message): return
+    if await reject_if_banned_message(message):
+        return
     seen_words = await get_seen_words(user_id, limit=300)
     if len(seen_words) < 4:
         await message.answer("🧪 Test սկսելու համար պետք է առնվազն 4 անցած բառ։")
@@ -336,7 +342,8 @@ async def test_handler(message: Message):
 
 @router.callback_query(F.data.startswith("test:ans:"))
 async def test_answer_handler(callback: CallbackQuery):
-    if await reject_if_banned_callback(callback): return
+    if await reject_if_banned_callback(callback):
+        return
     user_id = callback.from_user.id
     session = test_sessions.get(user_id)
     if not session:
@@ -351,7 +358,7 @@ async def test_answer_handler(callback: CallbackQuery):
         session["score"] += 1
         await callback.answer("Ճիշտ է ✅")
     else:
-        await callback.answer(f"Սխալ է ❌")
+        await callback.answer("Սխալ է ❌")
     session["index"] += 1
     if session["index"] >= session["total"]:
         score, total = session["score"], session["total"]
@@ -360,3 +367,35 @@ async def test_answer_handler(callback: CallbackQuery):
     else:
         text, kb = await _build_test_question(user_id, session)
         await safe_edit_text(callback.message, text, reply_markup=kb)
+
+
+@router.message(F.voice, lambda m: m.from_user.id in pronunciation_waiting_users)
+async def pronunciation_voice_handler(message: Message):
+    user_id = message.from_user.id
+    word = pronunciation_waiting_users[user_id]
+    del pronunciation_waiting_users[user_id]
+
+    await verify_pronunciation_with_ai(message.bot, message, word)
+
+
+@router.callback_query(F.data.startswith("audio:"))
+async def audio_callback_handler(callback: CallbackQuery):
+    if await reject_if_banned_callback(callback):
+        return
+    parts = callback.data.split(":")
+    # Expected formats: 
+    # audio:<accent>:<word> (e.g. audio:us:hello)
+    # audio:<word> (legacy fallback)
+    
+    if len(parts) >= 3:
+        accent = parts[1]
+        word = parts[2]
+    elif len(parts) == 2:
+        accent = "us"
+        word = parts[1]
+    else:
+        await callback.answer()
+        return
+        
+    await send_word_pronunciation(callback.bot, callback.message.chat.id, word, accent=accent)
+    await callback.answer(f"Լսում ենք {accent.upper()} տարբերակը 🔊")

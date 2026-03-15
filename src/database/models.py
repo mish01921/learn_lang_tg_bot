@@ -1,8 +1,9 @@
-import asyncpg
-from datetime import datetime, timedelta
-import logging
 import json
+import logging
 import re
+from datetime import datetime, timedelta
+
+import asyncpg
 
 from src.core.config import DATABASE_URL
 
@@ -258,6 +259,15 @@ async def _init_postgres_schema():
             )
         """)
 
+        # word_audio_cache table
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS word_audio_cache (
+                word        TEXT PRIMARY KEY,
+                file_id     TEXT NOT NULL,
+                created_at  TEXT NOT NULL
+            )
+        """)
+
         # Indexes
         await db.execute("CREATE INDEX IF NOT EXISTS idx_progress_user ON word_progress(user_id)")
         await db.execute("CREATE INDEX IF NOT EXISTS idx_progress_review ON word_progress(user_id, next_review)")
@@ -331,22 +341,6 @@ async def update_streak(user_id: int):
             UPDATE users SET streak = ?, last_active = ? WHERE user_id = ?
         """, (new_streak, now.isoformat(), user_id))
         await db.commit()
-
-
-async def set_user_plan(user_id: int, plan: str):
-    if plan not in {"steady", "deep"}:
-        return
-    async with _db_connect() as db:
-        await db.execute("UPDATE users SET study_plan = ? WHERE user_id = ?", (plan, user_id))
-        await db.commit()
-
-
-async def get_user_plan(user_id: int) -> str:
-    async with _db_connect() as db:
-        db.row_factory = asyncpg.Record
-        async with db.execute("SELECT study_plan FROM users WHERE user_id = ?", (user_id,)) as cur:
-            row = await cur.fetchone()
-    return row["study_plan"] if row and row["study_plan"] else "steady"
 
 
 async def set_user_plan(user_id: int, plan: str):
@@ -1294,12 +1288,12 @@ async def get_user_full_profile(user_id: int) -> dict | None:
             SELECT * FROM users WHERE user_id = ?
         """, (user_id,)) as cur:
             user = await cur.fetchone()
-        
+
         if not user:
             return None
-            
+
         async with db.execute("""
-            SELECT 
+            SELECT
                 COUNT(*) as seen,
                 SUM(marked_know) as learned,
                 SUM(marked_hard) as hard,
@@ -1308,7 +1302,7 @@ async def get_user_full_profile(user_id: int) -> dict | None:
             FROM word_progress WHERE user_id = ?
         """, (user_id,)) as cur:
             prog = await cur.fetchone()
-            
+
         return {
             "info": dict(user),
             "stats": dict(prog) if prog else {}
@@ -1520,3 +1514,32 @@ async def get_admin_audit_logs(limit: int = 20) -> list[dict]:
             d["metadata"] = {}
         out.append(d)
     return out
+
+
+# ═══════════════════════════════════════════════════════
+# AUDIO CACHE
+# ═══════════════════════════════════════════════════════
+
+async def get_voice_file_id(word: str) -> str | None:
+    async with _db_connect() as db:
+        db.row_factory = asyncpg.Record
+        async with db.execute(
+            "SELECT file_id FROM word_audio_cache WHERE word = ?",
+            (word.strip().lower(),)
+        ) as cur:
+            row = await cur.fetchone()
+    return row["file_id"] if row else None
+
+
+async def save_voice_file_id(word: str, file_id: str):
+    now = datetime.now().isoformat()
+    async with _db_connect() as db:
+        await db.execute(
+            """
+            INSERT INTO word_audio_cache (word, file_id, created_at)
+            VALUES (?, ?, ?)
+            ON CONFLICT (word) DO UPDATE SET file_id = EXCLUDED.file_id, created_at = EXCLUDED.created_at
+            """,
+            (word.strip().lower(), file_id, now)
+        )
+        await db.commit()

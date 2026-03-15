@@ -1,6 +1,7 @@
 import os
 from pathlib import Path
 
+
 def _load_local_env() -> None:
     """Minimal .env loader to avoid external dependency in restricted environments."""
     # Check current dir, then one up, then two up
@@ -15,7 +16,7 @@ def _load_local_env() -> None:
         if p.exists():
             env_path = p
             break
-            
+
     if not env_path:
         return
     try:

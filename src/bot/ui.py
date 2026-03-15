@@ -1,5 +1,10 @@
-from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, ReplyKeyboardMarkup, KeyboardButton
-from datetime import datetime
+
+from aiogram.types import (
+    InlineKeyboardButton,
+    InlineKeyboardMarkup,
+    KeyboardButton,
+    ReplyKeyboardMarkup,
+)
 
 
 def get_main_menu_keyboard() -> ReplyKeyboardMarkup:
@@ -35,6 +40,13 @@ def get_daily_roadmap_keyboard(steps: list[dict]) -> InlineKeyboardMarkup:
 def get_word_keyboard(word: str) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
+            [
+                InlineKeyboardButton(text="🇺🇸 Listen (US)", callback_data=f"audio:us:{word}"),
+                InlineKeyboardButton(text="🇬🇧 Listen (UK)", callback_data=f"audio:uk:{word}"),
+            ],
+            [
+                InlineKeyboardButton(text="🎙️ Test my Voice", callback_data=f"word:pronounce:{word}"),
+            ],
             [
                 InlineKeyboardButton(text="❌ Again", callback_data=f"word:again:{word}"),
                 InlineKeyboardButton(text="🟠 Hard", callback_data=f"word:hard:{word}"),
@@ -84,9 +96,14 @@ def get_review_start_keyboard() -> InlineKeyboardMarkup:
 
 def get_review_flashcard_keyboard(word: str, show_translation: bool, show_example: bool) -> InlineKeyboardMarkup:
     rows = []
-    
+
     # If translation is shown, show rating buttons
     if show_translation:
+        rows.append([
+            InlineKeyboardButton(text="🇺🇸 US", callback_data=f"audio:us:{word}"),
+            InlineKeyboardButton(text="🇬🇧 UK", callback_data=f"audio:uk:{word}"),
+            InlineKeyboardButton(text="🎙️ Test", callback_data=f"word:pronounce:{word}"),
+        ])
         rows.append([
             InlineKeyboardButton(text="❌ Again", callback_data=f"review:again:{word}"),
             InlineKeyboardButton(text="🟠 Hard", callback_data=f"review:hard:{word}"),
@@ -96,11 +113,18 @@ def get_review_flashcard_keyboard(word: str, show_translation: bool, show_exampl
             InlineKeyboardButton(text="🚀 Easy", callback_data=f"review:easy:{word}"),
         ])
     else:
-        rows.append([InlineKeyboardButton(text="👁️ Show Translate", callback_data=f"review:show_tr:{word}")])
-        
+        rows.append([
+            InlineKeyboardButton(text="🇺🇸 US", callback_data=f"audio:us:{word}"),
+            InlineKeyboardButton(text="🇬🇧 UK", callback_data=f"audio:uk:{word}"),
+            InlineKeyboardButton(text="🎙️ Test", callback_data=f"word:pronounce:{word}"),
+        ])
+        rows.append([
+            InlineKeyboardButton(text="👁️ Show Translate", callback_data=f"review:show_tr:{word}"),
+        ])
+
     if not show_example:
         rows.append([InlineKeyboardButton(text="💡 Show Example", callback_data=f"review:show_ex:{word}")])
-        
+
     rows.append([InlineKeyboardButton(text="⏭️ Skip", callback_data=f"review:next:{word}")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
@@ -134,7 +158,7 @@ def get_level_keyboard(current_level: str = "A1", placement_done: bool = False, 
         for lvl_code, label in levels[i:i+2]:
             is_current = (lvl_code == current_level)
             is_locked = not unlock_all and placement_done and lvl_code != current_level
-            
+
             prefix = "✅ " if is_current else ("🔒 " if is_locked else "")
             btn_text = f"{prefix}{lvl_code} ({label})"
             row.append(InlineKeyboardButton(text=btn_text, callback_data=f"level:set:{lvl_code}"))
@@ -151,7 +175,7 @@ def get_coach_keyboard(focus_word: str | None = None) -> InlineKeyboardMarkup:
     ]
     if focus_word:
         rows.append([InlineKeyboardButton(text=f"🎯 Focus: {focus_word}", callback_data=f"coach:focus:{focus_word}")])
-    
+
     rows.append([InlineKeyboardButton(text="📊 Մանրամասն վիճակագրություն", callback_data="coach:full_stats")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
@@ -226,3 +250,17 @@ def get_admin_users_keyboard(users: list[dict], limit: int = 30) -> InlineKeyboa
         )
     rows.append([InlineKeyboardButton(text="🔙 Back", callback_data="adminui:refresh")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def get_pronunciation_feedback_keyboard(word: str, score: int) -> InlineKeyboardMarkup:
+    buttons = [
+        InlineKeyboardButton(text="🔄 Try Again", callback_data=f"word:pronounce:{word}"),
+    ]
+    # Add YouGlish button for visual aid
+    buttons.append(InlineKeyboardButton(text="📺 See Video", url=f"https://youglish.com/pronounce/{word}/english"))
+    
+    # Show "Next Word" only if score is 95 or higher
+    if score >= 95:
+        buttons.append(InlineKeyboardButton(text="⏭️ Next Word", callback_data="word:next"))
+    
+    return InlineKeyboardMarkup(inline_keyboard=[buttons])

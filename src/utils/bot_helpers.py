@@ -1,21 +1,28 @@
 import asyncio
-from aiogram.types import Message, CallbackQuery
 
-from src.data.api_words import get_word_data, COMMON_WORDS
+from aiogram.types import CallbackQuery, Message
+
+from src.bot.ui import (
+    get_review_flashcard_keyboard,
+    get_review_start_keyboard,
+    get_story_genre_keyboard,
+    get_word_keyboard,
+)
 from src.core.app_state import last_presented_words, review_sessions, story_translation_overrides
-from src.core.config import DAILY_LIMIT, WORD_LEVEL_CHOICES
+from src.core.config import DAILY_LIMIT
+from src.core.texts import format_date, format_word
+from src.data.api_words import COMMON_WORDS, get_word_data
+from src.data.level_words import extract_headword as _extract_headword
+from src.data.level_words import load_levelled_words as _load_levelled_words
 from src.database.models import (
     get_daily_count,
+    get_hard_words,
     get_next_word,
-    get_word_reason,
     get_user_level,
+    get_word_reason,
     get_wordset_progress,
     set_user_level,
-    get_hard_words,
 )
-from src.data.level_words import load_levelled_words as _load_levelled_words, extract_headword as _extract_headword
-from src.core.texts import format_word, format_date
-from src.bot.ui import get_word_keyboard, get_story_genre_keyboard, get_review_start_keyboard, get_review_flashcard_keyboard
 from src.utils.utils import safe_edit_text
 
 
@@ -112,7 +119,7 @@ async def _build_story_glossary_text(words: list[str], user_id: int | None = Non
     tasks = [get_word_data(w) for w in uniq_words]
     rows = await asyncio.gather(*tasks, return_exceptions=True)
     lines = ["📘 Glossary"]
-    for w, row in zip(uniq_words, rows):
+    for w, row in zip(uniq_words, rows, strict=False):
         custom = (overrides.get(w) or "").strip()
         if custom:
             tr = custom
@@ -199,7 +206,7 @@ async def send_review_list(message: Message, user_id: int) -> bool:
     review_sessions[user_id] = {"words": words_only, "index": 0, "show_translation": False, "show_example": False}
 
     lines = [f"{i}. {w['word']}  [{_grade_tag(w.get('last_grade') or 'hard')}] ({format_date(w.get('added_at', ''))})" for i, w in enumerate(words, 1)]
-    
+
     guide = (
         "💡 **Ինչպե՞ս գնահատել.**\n"
         "❌ **Again**: Չհիշեցի (կրկնել շուտով)\n"
@@ -210,7 +217,7 @@ async def send_review_list(message: Message, user_id: int) -> bool:
 
     lines_text = "\n".join(lines)
     await message.answer(
-        f"📘 **Review բառերի ցանկ**\n\n" 
+        f"📘 **Review բառերի ցանկ**\n\n"
         f"{lines_text}\n\n"
         f"{guide}\n"
         f"Սեղմեք «🔁 Կրկնել (Flashcards)»։",

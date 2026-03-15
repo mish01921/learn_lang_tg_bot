@@ -1,17 +1,18 @@
 import random
-from aiogram import Router, F
-from aiogram.filters import Command
-from aiogram.types import Message, CallbackQuery
 
-from src.database.models import is_placement_done, get_user_level, set_placement_result
-from src.bot.ui import get_placement_start_keyboard, get_placement_options_keyboard
+from aiogram import F, Router
+from aiogram.filters import Command
+from aiogram.types import CallbackQuery, Message
+
+from src.bot.ui import get_placement_options_keyboard, get_placement_start_keyboard
 from src.core.app_state import placement_sessions
 from src.data.placement_questions import CEFR_PLACEMENT_QUESTIONS
+from src.database.models import get_user_level, is_placement_done, set_placement_result
 from src.utils.utils import (
-    touch_user_from_message,
-    reject_if_banned_message,
     reject_if_banned_callback,
-    safe_edit_text
+    reject_if_banned_message,
+    safe_edit_text,
+    touch_user_from_message,
 )
 
 router = Router()

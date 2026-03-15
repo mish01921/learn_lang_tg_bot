@@ -1,16 +1,18 @@
 import asyncio
-from datetime import datetime
 from collections import deque
+from datetime import datetime
 
 PROCESSED_CALLBACKS_MAX = 5000
 
 processed_callbacks: set[str] = set()
 processed_callbacks_order: deque[str] = deque()
 user_locks: dict[int, asyncio.Lock] = {}
-search_waiting_users: set[int] = set()
-explain_waiting_users: set[int] = set()
+search_waiting_users:set[int] = set()
+explain_waiting_users:set[int] = set()
 practice_waiting_users: dict[int, str] = {} # user_id -> word being practiced
+pronunciation_waiting_users: dict[int, str] = {} # user_id -> word being practiced for pronunciation
 pomodoro_sessions: dict[int, datetime] = {} # user_id -> start_time
+
 last_presented_words: dict[int, str] = {}
 test_sessions: dict[int, dict] = {}
 review_sessions: dict[int, dict] = {}

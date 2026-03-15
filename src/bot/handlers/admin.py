@@ -1,22 +1,23 @@
-from aiogram import Router, F
-from aiogram.filters import BaseFilter, Command
-from aiogram.types import Message, CallbackQuery
 from datetime import datetime
 
+from aiogram import F, Router
+from aiogram.filters import BaseFilter, Command
+from aiogram.types import CallbackQuery, Message
+
+from src.bot.ui import get_admin_keyboard, get_admin_users_keyboard
 from src.core.config import ADMIN_USER_IDS
 from src.database.models import (
-    get_health_snapshot,
-    get_all_users,
-    get_top_leaderboard,
-    set_user_ban,
     find_user_id_by_username,
-    get_all_user_ids,
     get_admin_overview,
+    get_all_user_ids,
+    get_all_users,
+    get_health_snapshot,
+    get_top_leaderboard,
+    get_user_daily_stats,
     get_user_full_profile,
-    get_user_daily_stats
+    set_user_ban,
 )
-from src.bot.ui import get_admin_keyboard, get_admin_users_keyboard
-from src.utils.utils import safe_edit_text, parse_positive_int_arg
+from src.utils.utils import parse_positive_int_arg, safe_edit_text
 
 router = Router()
 BOT_STARTED_AT = datetime.now()
@@ -86,7 +87,7 @@ async def top_handler(message: Message):
 async def broadcast_handler(message: Message):
     parts = (message.text or "").split(maxsplit=1)
     payload = parts[1].strip() if len(parts) > 1 else ""
-    
+
     if not payload and not message.reply_to_message:
         await message.answer("Օգտագործում՝ /broadcast <text> կամ reply արեք հաղորդագրությանը։")
         return
@@ -108,7 +109,7 @@ async def broadcast_handler(message: Message):
             sent += 1
         except Exception:
             failed += 1
-            
+
     await status_msg.edit_text(
         f"📣 Broadcast ավարտվեց\n\n"
         f"✅ Sent: {sent}\n"
@@ -122,20 +123,20 @@ async def ban_handler(message: Message):
     if len(parts) < 2:
         await message.answer("Օգտագործում՝ /ban <user_id|@username> [reason]")
         return
-    
+
     target_input = parts[1].strip()
     reason = parts[2].strip() if len(parts) > 2 else "Admin command"
-    
+
     target_id = None
     if target_input.isdigit():
         target_id = int(target_input)
     elif target_input.startswith("@"):
         target_id = await find_user_id_by_username(target_input)
-    
+
     if not target_id:
         await message.answer("❗ User չի գտնվել։")
         return
-        
+
     if target_id in ADMIN_USER_IDS:
         await message.answer("⛔ Ադմին ban անել չի թույլատրվում։")
         return
@@ -151,14 +152,14 @@ async def unban_handler(message: Message):
     if len(parts) < 2:
         await message.answer("Օգտագործում՝ /unban <user_id|@username>")
         return
-    
+
     target_input = parts[1].strip()
     target_id = None
     if target_input.isdigit():
         target_id = int(target_input)
     elif target_input.startswith("@"):
         target_id = await find_user_id_by_username(target_input)
-    
+
     if not target_id:
         await message.answer("❗ User չի գտնվել։")
         return
@@ -176,16 +177,17 @@ async def admin_ui_handler(callback: CallbackQuery):
         return
 
     action = callback.data.split(":")[1]
-    
+
     if action == "overview":
         stats = await get_admin_overview()
-        
+
         # Format Level Distribution
         levels_text = "\n".join([f"  • {lvl}: {count}" for lvl, count in stats['levels'].items()])
-        
+
         # Format Difficult Words
         diff_text = "\n".join([f"  • {w['word']} (errors: {w['total_wrong']})" for w in stats['difficult_words']])
-        if not diff_text: diff_text = "  (No data yet)"
+        if not diff_text:
+            diff_text = "  (No data yet)"
 
         text = (
             f"📊 **Global Overview**\n"
@@ -215,14 +217,14 @@ async def admin_ui_handler(callback: CallbackQuery):
         if not profile:
             await callback.answer("User not found", show_alert=True)
             return
-            
+
         u = profile['info']
         s = profile['stats']
         daily = await get_user_daily_stats(target_id)
-        
+
         username = f"@{u['username']}" if u.get('username') else "None"
         last_active = u.get('last_active', 'Never')[:16].replace('T', ' ')
-        
+
         text = (
             f"👤 **User Profile: {target_id}**\n"
             f"━━━━━━━━━━━━━━━\n"
@@ -256,7 +258,7 @@ async def admin_ui_handler(callback: CallbackQuery):
             lines.append(f"{i}. {name} — {u['learned_count']} learned")
         await safe_edit_text(callback.message, "\n".join(lines), reply_markup=get_admin_keyboard())
         await callback.answer()
-        
+
     elif action == "broadcast_help":
         text = (
             "📣 Broadcast Help\n\n"
@@ -279,7 +281,7 @@ async def admin_mod_handler(callback: CallbackQuery):
 
     parts = callback.data.split(":")
     action = parts[1]
-    
+
     if action == "back":
         await safe_edit_text(callback.message, "🛠 Admin Panel", reply_markup=get_admin_keyboard())
         await callback.answer()
@@ -295,20 +297,20 @@ async def admin_mod_handler(callback: CallbackQuery):
     if action in ("ban", "unban"):
         target_id = int(parts[2])
         limit = int(parts[3]) if len(parts) > 3 else 30
-        
+
         if target_id in ADMIN_USER_IDS:
              await callback.answer("⛔ Cannot ban admin", show_alert=True)
              return
 
         is_ban = (action == "ban")
         await set_user_ban(target_id, is_ban, reason="Admin UI action")
-        
+
         # Refresh list
         users = await get_all_users(limit=limit)
         await safe_edit_text(callback.message, f"👥 Last {len(users)} Users", reply_markup=get_admin_users_keyboard(users, limit))
         await callback.answer(f"User {target_id} {'banned' if is_ban else 'unbanned'}")
         return
-        
+
     if action == "user":
         target_id = int(parts[2])
         await callback.answer(f"User ID: {target_id}")

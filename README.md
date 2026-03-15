@@ -11,6 +11,9 @@
 - **🧠 Smart Learning (SRS):** Բառերի կրկնության խելացի համակարգ (Again, Hard, Good, Easy), որը հաշվարկում է հաջորդ կրկնության օրը։
 - **🤖 AI Integration (Gemini):**
   - **Interactive Practice:** Կազմեք նախադասություններ նոր բառերով, ստացեք AI վերլուծություն։
+  - **Pronunciation Analysis (ELSA Style):** Ձայնագրեք ձեր արտասանությունը և ստացեք մանրամասն AI feedback (Score 0-100, լեզվի դիրք, շուրթերի ձև)։
+  - **Visual Pronunciation Guide:** Ինտեգրում YouGlish-ի և Google Interactive Pronunciation-ի հետ՝ տեսողական սովորելու համար։
+  - **Dual Accents:** Լսեք յուրաքանչյուր բառի թե՛ **Ամերիկյան (US)**, թե՛ **Բրիտանական (UK)** տարբերակները։
   - **AI Coach:** Ձեր առաջընթացի անհատական վերլուծություն և մոտիվացիա։
   - **Contextual Stories:** Կարճ պատմություններ օրվա բառերով։
   - **Memory Palace:** Մնեմոնիկ տեխնիկաներ բառերը հիշելու համար։

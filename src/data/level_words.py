@@ -1,7 +1,6 @@
 import logging
 import os
 import re
-
 from pathlib import Path
 
 COMMON_WORDS_FILE = str(Path(__file__).parent / "common_words.txt")

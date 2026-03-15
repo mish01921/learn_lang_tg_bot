@@ -7,10 +7,10 @@ Create Date: 2026-03-08 12:15:00
 
 from typing import Sequence, Union
 
-from alembic import op
 import sqlalchemy as sa
 from alembic.runtime.migration import MigrationContext
 
+from alembic import op
 
 revision: str = "20260308_0002"
 down_revision: Union[str, None] = "20260308_0001"

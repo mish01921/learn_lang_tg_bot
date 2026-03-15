@@ -3,10 +3,10 @@ import tempfile
 import unittest
 from datetime import datetime, timedelta
 
-import src.main as bot
-import src.database.models as database
-import src.data.level_words as level_words
 import src.core.texts as texts
+import src.data.level_words as level_words
+import src.database.models as database
+import src.main as bot
 
 
 class TestBotParsing(unittest.TestCase):
@@ -90,11 +90,11 @@ class TestDatabaseNextWord(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         # Ensure schema exists
         await database.init_db()
-        
+
         # Clean up tables before each test
         async with database._db_connect() as db:
             await db.execute("TRUNCATE users, word_progress, sessions, story_history, memory_palace_history, admin.audit_log RESTART IDENTITY CASCADE")
-            
+
         await database.ensure_user(1, "tester")
 
     async def asyncTearDown(self):

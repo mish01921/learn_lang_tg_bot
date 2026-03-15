@@ -1,45 +1,47 @@
-from aiogram import Router, F
+from aiogram import F, Router
 from aiogram.filters import Command, CommandStart
-from aiogram.types import Message, CallbackQuery
+from aiogram.types import CallbackQuery, Message
 
+from src.bot.ui import (
+    get_coach_keyboard,
+    get_daily_roadmap_keyboard,
+    get_level_keyboard,
+    get_main_menu_keyboard,
+    get_placement_start_keyboard,
+    get_plan_selection_keyboard,
+    get_search_keyboard,
+)
+from src.core.config import DAILY_LIMIT, WORD_LEVEL_CHOICES
+from src.core.texts import build_start_text
+from src.data.api_words import COMMON_WORDS
+from src.data.level_words import chunk_text as _chunk_text
+from src.data.level_words import load_levelled_words as _load_levelled_words
 from src.database.models import (
-    get_stats,
-    get_daily_count,
-    reset_progress,
-    is_placement_done,
-    get_user_level,
-    set_user_level,
-    get_top_weak_words,
-    get_hard_words,
-    get_recent_accuracy,
-    get_recent_accuracy_window,
-    get_word_grade_map,
-    get_user_plan,
-    set_user_plan,
     count_story_generations_today,
+    get_daily_count,
+    get_stats,
+    get_top_weak_words,
+    get_user_level,
+    get_user_plan,
+    get_word_grade_map,
+    is_placement_done,
+    reset_progress,
+    set_user_level,
+    set_user_plan,
+)
+from src.utils.bot_helpers import (
+    _build_levels_lock_text,
+    _grade_tag,
+    maybe_promote_level,
+    send_next_word_card,
+    send_review_list,
 )
 from src.utils.utils import (
-    touch_user_from_message,
-    reject_if_banned_message,
-    reject_if_banned_callback,
     is_unlimited_user,
-    parse_positive_int_arg,
+    reject_if_banned_callback,
+    reject_if_banned_message,
+    touch_user_from_message,
 )
-from src.core.config import ADMIN_USER_IDS
-from src.data.api_words import COMMON_WORDS
-from src.data.level_words import load_levelled_words as _load_levelled_words, chunk_text as _chunk_text
-from src.core.texts import build_start_text, build_coach_text
-from src.bot.ui import (
-    get_placement_start_keyboard,
-    get_level_keyboard,
-    get_coach_keyboard,
-    get_search_keyboard,
-    get_plan_selection_keyboard,
-    get_daily_roadmap_keyboard,
-    get_main_menu_keyboard
-)
-from src.utils.bot_helpers import _build_levels_lock_text, _grade_tag, send_review_list, send_next_word_card, maybe_promote_level
-from src.core.config import DAILY_LIMIT, WORD_LEVEL_CHOICES
 
 router = Router()
 
@@ -89,7 +91,6 @@ async def levels_handler(message: Message):
 
 @router.callback_query(F.data.startswith("level:"))
 async def level_select_handler(callback: CallbackQuery):
-    from src.utils.utils import safe_edit_text
     if await reject_if_banned_callback(callback):
         return
     user_id = callback.from_user.id
@@ -97,12 +98,12 @@ async def level_select_handler(callback: CallbackQuery):
     if not is_unlimited and not await is_placement_done(user_id):
         await callback.answer("Սկզբում անցեք placement test-ը։", show_alert=True)
         return
-    
+
     parts = callback.data.split(":")
     if len(parts) < 3:
         await callback.answer("Սխալ տվյալ", show_alert=True)
         return
-        
+
     level = parts[2].upper()
     if level not in WORD_LEVEL_CHOICES:
         await callback.answer("Սխալ մակարդակ", show_alert=True)
@@ -129,7 +130,7 @@ async def stats_handler(message: Message):
     s = await get_stats(user_id, len(COMMON_WORDS))
     daily_count = await get_daily_count(user_id)
     daily_limit_label = "∞" if is_unlimited_user(user_id) else str(DAILY_LIMIT)
-    
+
     bars = 15
     filled = round(s['progress_pct'] / 100 * bars)
     progress_bar = "🟢" * filled + "⚪" * (bars - filled)
@@ -149,7 +150,7 @@ async def stats_handler(message: Message):
 
 @router.message(Command("coach"))
 async def coach_handler(message: Message):
-    from src.data.api_words import get_tutor_explanation_gemini, _get_http_session
+    from src.data.api_words import _get_http_session, get_tutor_explanation_gemini
     user_id = message.from_user.id
     await touch_user_from_message(message)
     if await reject_if_banned_message(message):
@@ -161,9 +162,9 @@ async def coach_handler(message: Message):
     daily_count = await get_daily_count(user_id)
     level = await get_user_level(user_id)
     weak_words = await get_top_weak_words(user_id, limit=5)
-    
+
     weak_list = ", ".join([w['word'] for w in weak_words]) if weak_words else "none"
-    
+
     prompt = (
         f"You are a professional English Coach. Analyze this student's data and give a brief, "
         f"motivating and highly specific feedback in Armenian.\n"
@@ -183,7 +184,7 @@ async def coach_handler(message: Message):
 
     session = await _get_http_session()
     analysis = await get_tutor_explanation_gemini(session, prompt)
-    
+
     await msg.edit_text(
         f"👨‍🏫 **Coach Analysis**\n\n{analysis}",
         reply_markup=get_coach_keyboard(weak_words[0]['word'] if weak_words else None),
@@ -192,11 +193,12 @@ async def coach_handler(message: Message):
 
 @router.callback_query(F.data.startswith("coach:"))
 async def coach_callback_handler(callback: CallbackQuery):
+    from src.core.texts import format_searched_word
     from src.data.api_words import get_word_data
     from src.data.level_words import find_word_levels
-    from src.core.texts import format_searched_word
 
-    if await reject_if_banned_callback(callback): return
+    if await reject_if_banned_callback(callback):
+        return
     user_id = callback.from_user.id
 
     data = callback.data or ""
@@ -204,7 +206,7 @@ async def coach_callback_handler(callback: CallbackQuery):
     if len(parts) < 2:
         await callback.answer("Սխալ տվյալ", show_alert=True)
         return
-        
+
     action = parts[1]
     word = parts[2] if len(parts) > 2 else None
 
@@ -248,28 +250,32 @@ async def _send_words_by_level(message: Message, level: str):
 @router.message(Command("all_words_A1", "all_words_A2", "all_words_B1", "all_words_B2"))
 async def all_words_level_handler(message: Message):
     await touch_user_from_message(message)
-    if await reject_if_banned_message(message): return
+    if await reject_if_banned_message(message):
+        return
     level = (message.text or "").strip().split("_")[-1].upper()
     await _send_words_by_level(message, level)
 
 @router.message(Command("reset"))
 async def reset_handler(message: Message):
     await touch_user_from_message(message)
-    if await reject_if_banned_message(message): return
+    if await reject_if_banned_message(message):
+        return
     await reset_progress(message.from_user.id, preserve_history=True)
     await message.answer("♻️ Reset արվեց։ Ձեր learned/seen բառերը պահպանվել են։")
 
 @router.message(Command("reset_all"))
 async def reset_all_handler(message: Message):
     await touch_user_from_message(message)
-    if await reject_if_banned_message(message): return
+    if await reject_if_banned_message(message):
+        return
     await reset_progress(message.from_user.id, preserve_history=False)
     await message.answer("⚠️ Ձեր ամբողջ history-ն ջնջվեց։")
 
 @router.message(Command("plan"))
 async def plan_command_handler(message: Message):
     await touch_user_from_message(message)
-    if await reject_if_banned_message(message): return
+    if await reject_if_banned_message(message):
+        return
     await message.answer(
         "🎓 **Ընտրիր քո ուսումնական պլանը:**\n\n"
         "**🐢 Steady Learner:** Օրական 5 նոր բառ + Կրկնություն + Պատմություն։\n"
@@ -280,7 +286,8 @@ async def plan_command_handler(message: Message):
 @router.message(Command("roadmap"))
 async def roadmap_command_handler(message: Message):
     await touch_user_from_message(message)
-    if await reject_if_banned_message(message): return
+    if await reject_if_banned_message(message):
+        return
     user_id = message.from_user.id
 
     plan = await get_user_plan(user_id)

@@ -1,54 +1,52 @@
-import asyncio
-from aiogram import Router, F
+from aiogram import F, Router
 from aiogram.filters import Command
-from aiogram.types import Message, CallbackQuery
+from aiogram.types import CallbackQuery, Message
 
-from src.database.models import (
-    get_today_answered_words,
-    count_story_generations_today,
-    count_palace_generations_today,
-    get_story_history,
-    get_memory_palace_history,
-    save_story_history,
-    save_memory_palace_history,
+from src.bot.ui import get_palace_theme_keyboard, get_search_keyboard, get_story_genre_keyboard
+from src.core.app_state import (
+    explain_waiting_users,
+    search_waiting_users,
+    story_translation_overrides,
 )
-from src.utils.utils import (
-    touch_user_from_message,
-    reject_if_banned_message,
-    reject_if_banned_callback,
-    is_unlimited_user,
-    parse_positive_int_arg,
+from src.core.config import (
+    DAILY_PALACE_LIMIT,
+    DAILY_STORY_LIMIT,
+    PALACE_THEMES,
+    STORY_GENRES,
 )
+from src.core.texts import format_searched_word
 from src.data.api_words import (
-    get_word_data,
-    get_ai_example_sentences,
+    _get_http_session,
+    extract_headword,
     generate_contextual_story,
     generate_memory_palace_text,
+    get_ai_example_sentences,
     get_tutor_explanation_gemini,
-    extract_headword,
-    _get_http_session,
+    get_word_data,
 )
-from src.core.app_state import (
-    search_waiting_users,
-    explain_waiting_users,
-    story_translation_overrides,
-    processed_callbacks,
-    register_processed_callback,
-)
-from src.bot.ui import get_search_keyboard, get_story_genre_keyboard, get_palace_theme_keyboard
-from src.core.texts import format_searched_word
-from src.data.level_words import chunk_text as _chunk_text, find_word_levels
-from src.core.config import (
-    DAILY_STORY_LIMIT,
-    DAILY_PALACE_LIMIT,
-    STORY_GENRES,
-    PALACE_THEMES,
+from src.data.level_words import chunk_text as _chunk_text
+from src.data.level_words import find_word_levels
+from src.database.models import (
+    count_palace_generations_today,
+    count_story_generations_today,
+    get_memory_palace_history,
+    get_story_history,
+    get_today_answered_words,
+    save_memory_palace_history,
+    save_story_history,
 )
 from src.utils.bot_helpers import (
-    _build_story_intro_text,
     _build_palace_intro_text,
-    _parse_story_translation_pairs,
     _build_story_glossary_text,
+    _build_story_intro_text,
+    _parse_story_translation_pairs,
+)
+from src.utils.utils import (
+    is_unlimited_user,
+    parse_positive_int_arg,
+    reject_if_banned_callback,
+    reject_if_banned_message,
+    touch_user_from_message,
 )
 
 router = Router()
@@ -56,7 +54,8 @@ router = Router()
 @router.message(Command("search"))
 async def search_handler(message: Message):
     await touch_user_from_message(message)
-    if await reject_if_banned_message(message): return
+    if await reject_if_banned_message(message):
+        return
 
     parts = (message.text or "").split(maxsplit=1)
     if len(parts) > 1 and parts[1].strip():
@@ -71,7 +70,8 @@ async def search_handler(message: Message):
 
 @router.message(F.from_user.id.in_(search_waiting_users) & F.text & ~F.text.startswith('/'))
 async def search_text_handler(message: Message):
-    if await reject_if_banned_message(message): return
+    if await reject_if_banned_message(message):
+        return
     user_id = message.from_user.id
     search_waiting_users.discard(user_id)
 
@@ -90,7 +90,8 @@ async def search_text_handler(message: Message):
 @router.message(Command("example"))
 async def example_handler(message: Message):
     await touch_user_from_message(message)
-    if await reject_if_banned_message(message): return
+    if await reject_if_banned_message(message):
+        return
 
     parts = (message.text or "").split(maxsplit=1)
     if len(parts) < 2 or not parts[1].strip():
@@ -107,11 +108,12 @@ async def example_handler(message: Message):
 @router.message(Command("story"))
 async def story_handler(message: Message):
     await touch_user_from_message(message)
-    if await reject_if_banned_message(message): return
+    if await reject_if_banned_message(message):
+        return
     user_id = message.from_user.id
     is_unlimited = is_unlimited_user(user_id)
     if not is_unlimited and await count_story_generations_today(user_id) >= DAILY_STORY_LIMIT:
-        await message.answer(f"📖 Այսօրվա Story limit-ը լրացել է։")
+        await message.answer("📖 Այսօրվա Story limit-ը լրացել է։")
         return
     words = await get_today_answered_words(user_id, limit=10)
     if not is_unlimited and len(words) < 3:
@@ -121,8 +123,9 @@ async def story_handler(message: Message):
 
 @router.callback_query(F.data.startswith("story:genre:"))
 async def story_callback_handler(callback: CallbackQuery):
-    from src.database.models import get_user_level # circular
-    if await reject_if_banned_callback(callback): return
+    from src.database.models import get_user_level  # circular
+    if await reject_if_banned_callback(callback):
+        return
     user_id = callback.from_user.id
 
     genre_key = (callback.data or "").split(":")[-1]
@@ -144,11 +147,12 @@ async def story_callback_handler(callback: CallbackQuery):
 @router.message(Command("palace"))
 async def palace_handler(message: Message):
     await touch_user_from_message(message)
-    if await reject_if_banned_message(message): return
+    if await reject_if_banned_message(message):
+        return
     user_id = message.from_user.id
     is_unlimited = is_unlimited_user(user_id)
     if not is_unlimited and await count_palace_generations_today(user_id) >= DAILY_PALACE_LIMIT:
-        await message.answer(f"🧠 Այսօրվա Palace limit-ը լրացել է։")
+        await message.answer("🧠 Այսօրվա Palace limit-ը լրացել է։")
         return
     words = await get_today_answered_words(user_id, limit=10)
     if not is_unlimited and len(words) < 3:
@@ -158,8 +162,9 @@ async def palace_handler(message: Message):
 
 @router.callback_query(F.data.startswith("palace:theme:"))
 async def palace_callback_handler(callback: CallbackQuery):
-    from src.database.models import get_user_level # circular
-    if await reject_if_banned_callback(callback): return
+    from src.database.models import get_user_level  # circular
+    if await reject_if_banned_callback(callback):
+        return
     user_id = callback.from_user.id
 
     theme_key = (callback.data or "").split(":")[-1]
@@ -181,7 +186,8 @@ async def palace_callback_handler(callback: CallbackQuery):
 @router.message(Command("story_history", "palace_history"))
 async def history_handler(message: Message):
     await touch_user_from_message(message)
-    if await reject_if_banned_message(message): return
+    if await reject_if_banned_message(message):
+        return
 
     is_story = "story" in (message.text or "")
     limit = parse_positive_int_arg(message.text or "", default=5, min_value=1, max_value=20)
@@ -206,7 +212,8 @@ async def history_handler(message: Message):
 @router.message(Command("story_tr"))
 async def story_translation_handler(message: Message):
     await touch_user_from_message(message)
-    if await reject_if_banned_message(message): return
+    if await reject_if_banned_message(message):
+        return
     user_id = message.from_user.id
     parts = (message.text or "").split(maxsplit=1)
     arg = parts[1].strip() if len(parts) > 1 else ""
@@ -228,22 +235,24 @@ async def story_translation_handler(message: Message):
 
 @router.callback_query(F.data.startswith("explain:"))
 async def explain_callback_handler(callback: CallbackQuery):
-    if await reject_if_banned_callback(callback): return
+    if await reject_if_banned_callback(callback):
+        return
     query = callback.data.split(":")[1]
     await callback.answer("🧐 Մտածում եմ...")
     await _process_explanation(callback.message, query)
 
 @router.callback_query(F.data.startswith("audio:"))
 async def audio_callback_handler(callback: CallbackQuery):
-    if await reject_if_banned_callback(callback): return
+    if await reject_if_banned_callback(callback):
+        return
     word = callback.data.split(":")[1]
     word_data = await get_word_data(word)
     url = word_data.get("audio_url")
-    
+
     if not url:
         await callback.answer("🔊 Արտասանությունը հասանելի չէ այս բառի համար", show_alert=True)
         return
-        
+
     await callback.answer("🔊 Ուղարկում եմ ձայնը...")
     try:
         await callback.message.answer_voice(url)
@@ -253,7 +262,8 @@ async def audio_callback_handler(callback: CallbackQuery):
 @router.message(Command("explain"))
 async def explain_handler(message: Message):
     await touch_user_from_message(message)
-    if await reject_if_banned_message(message): return
+    if await reject_if_banned_message(message):
+        return
 
     parts = (message.text or "").split(maxsplit=1)
     if len(parts) > 1 and parts[1].strip():
@@ -265,7 +275,8 @@ async def explain_handler(message: Message):
 
 @router.message(F.from_user.id.in_(explain_waiting_users) & F.text & ~F.text.startswith('/'))
 async def explain_text_handler(message: Message):
-    if await reject_if_banned_message(message): return
+    if await reject_if_banned_message(message):
+        return
     user_id = message.from_user.id
     explain_waiting_users.discard(user_id)
 
@@ -277,15 +288,15 @@ async def explain_text_handler(message: Message):
     await _process_explanation(message, text)
 
 async def _process_explanation(message: Message, query: str):
-    from src.database.models import get_user_level # circular
+    from src.database.models import get_user_level  # circular
     user_id = message.from_user.id
-    
+
     await message.answer(f"🧐 Մտածում եմ `{query}`-ի մասին... ⏳")
-    
+
     level = await get_user_level(user_id)
     session = await _get_http_session()
-    
+
     explanation = await get_tutor_explanation_gemini(session, query, level=level)
-    
+
     for chunk in _chunk_text(explanation):
         await message.answer(chunk, parse_mode="Markdown")

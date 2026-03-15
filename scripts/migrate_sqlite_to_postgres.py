@@ -6,9 +6,7 @@ from datetime import datetime
 from pathlib import Path
 
 import asyncpg
-
 from config import DATABASE_URL
-
 
 TABLES_WITH_SERIAL_ID = [
     ("word_progress", "id"),

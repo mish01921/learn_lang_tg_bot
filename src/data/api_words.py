@@ -1,11 +1,14 @@
-import aiohttp
-from src.core.config import GEMINI_API_KEY
 import asyncio
 import logging
 import re
 from datetime import datetime, timedelta
-from typing import Optional, Dict, Any
 from pathlib import Path
+from typing import Any, Dict, Optional
+
+import aiohttp
+
+from src.core.config import GEMINI_API_KEY
+
 try:
     from src.core.config import GOOGLE_TRANSLATE_API_KEY
 except Exception:
@@ -762,9 +765,9 @@ async def get_tutor_explanation_gemini(session: aiohttp.ClientSession, query: st
         f"https://generativelanguage.googleapis.com/v1/models/"
         f"gemini-2.5-flash-lite:generateContent?key={GEMINI_API_KEY}"
     )
-    
+
     level = (level or "B1").upper()
-    
+
     prompt = (
         "You are a friendly and expert English Tutor (Tutor Mode).\n"
         f"The student (Level: {level}) wants an explanation for: '{query}'.\n\n"
@@ -825,5 +828,5 @@ async def get_tutor_explanation_gemini(session: aiohttp.ClientSession, query: st
         except Exception:
             logging.exception("Gemini Tutor request failed (attempt %s)", attempt + 1)
             await asyncio.sleep(0.5 * (attempt + 1))
-            
+
     return "⚠️ Sorry, I'm having trouble connecting to my knowledge base right now."

@@ -4,20 +4,14 @@ import os
 
 from aiogram import Bot, Dispatcher
 
+from src.bot.handlers import admin, features, general, placement, study
+from src.core.config import TOKEN
+from src.core.texts import BOT_DESCRIPTION, BOT_SHORT_DESCRIPTION
 from src.data.api_words import (
     close_http_session,
 )
-from src.core.config import TOKEN
 from src.database.models import (
     init_db,
-)
-from src.core.texts import BOT_DESCRIPTION, BOT_SHORT_DESCRIPTION
-from src.bot.handlers import (
-    placement,
-    general,
-    study,
-    features,
-    admin
 )
 
 logging.basicConfig(level=logging.INFO)
@@ -28,14 +22,14 @@ dp = Dispatcher()
 async def start_health_check_server():
     """Starts a minimal web server to satisfy Render's port binding requirement."""
     from aiohttp import web
-    
+
     async def handle_health(request):
         return web.Response(text="Bot is running OK")
 
     app = web.Application()
     app.router.add_get('/', handle_health)
     app.router.add_get('/health', handle_health)
-    
+
     runner = web.AppRunner(app)
     await runner.setup()
     port = int(os.getenv("PORT", 8080))
