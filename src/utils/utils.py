@@ -1,3 +1,5 @@
+import logging
+
 from aiogram.exceptions import TelegramBadRequest
 from aiogram.types import CallbackQuery, Message
 
@@ -15,8 +17,6 @@ async def safe_edit_text(message: Message, text: str, reply_markup=None, **kwarg
             return False
         raise
 
-import logging
-
 def is_unlimited_user(user_id: int) -> bool:
     is_admin = user_id in ADMIN_USER_IDS
     if not is_admin:
@@ -27,6 +27,11 @@ async def touch_user_from_message(message: Message):
     if not message.from_user:
         return
     await ensure_user(message.from_user.id, message.from_user.username or "")
+
+async def touch_user_from_callback(callback: CallbackQuery):
+    if not callback.from_user:
+        return
+    await ensure_user(callback.from_user.id, callback.from_user.username or "")
 
 async def reject_if_banned_message(message: Message) -> bool:
     user = message.from_user

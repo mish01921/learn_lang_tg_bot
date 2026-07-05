@@ -6,6 +6,7 @@ from aiogram.types import CallbackQuery, Message
 
 from src.bot.ui import get_placement_options_keyboard, get_placement_start_keyboard
 from src.core.app_state import placement_sessions
+from src.core.i18n import get_lang, t
 from src.data.placement_questions import CEFR_PLACEMENT_QUESTIONS
 from src.database.models import get_user_level, is_placement_done, set_placement_result
 from src.utils.utils import (
@@ -43,12 +44,14 @@ async def placement_handler(message: Message):
     await touch_user_from_message(message)
     if await reject_if_banned_message(message):
         return
-    if await is_placement_done(message.from_user.id):
-        level = await get_user_level(message.from_user.id)
-        await message.answer(f"✅ Placement test-ը արդեն ավարտել եք։ Ձեր մակարդակը՝ {level}։ Շարունակենք առաջ 🚀")
+    user_id = message.from_user.id
+    lang = get_lang(user_id)
+    if await is_placement_done(user_id):
+        level = await get_user_level(user_id)
+        await message.answer(t("placement_already_done", lang, level=level))
         return
     await message.answer(
-        "📝 Placement test-ը կօգնի որոշել ձեր մեկնարկային մակարդակը (A1-B2):",
+        t("placement_intro", lang),
         reply_markup=get_placement_start_keyboard(),
     )
 
@@ -120,14 +123,12 @@ async def placement_callback_handler(callback: CallbackQuery):
             level = _placement_level_from_score(score, total)
             await set_placement_result(user_id, level, score)
             placement_sessions.pop(user_id, None)
+            lang = get_lang(user_id)
             await safe_edit_text(
                 callback.message,
-                "✅ Placement test ավարտվեց\n\n"
-                f"Արդյունք: {score}/{total}\n"
-                f"Ձեր մեկնարկային մակարդակը՝ {level}\n\n"
-                "Այժմ կարող եք սկսել `/word` հրամանով։",
+                t("placement_completed", lang, score=score, total=total, level=level),
             )
-            await callback.answer("Placement ավարտվեց")
+            await callback.answer()
             return
 
         next_q = questions[idx]

@@ -5,11 +5,23 @@ from aiogram.types import CallbackQuery, Message
 from src.bot.ui import (
     get_review_flashcard_keyboard,
     get_review_start_keyboard,
+    get_start_new_word_keyboard,
     get_story_genre_keyboard,
     get_word_keyboard,
 )
-from src.core.app_state import last_presented_words, review_sessions, story_translation_overrides
+from src.core.app_state import (
+    cleanup_user_temp_messages,
+    clear_user_waiting_states,
+    current_word_session,
+    last_presented_words,
+    record_temp_message,
+    review_sessions,
+    story_translation_overrides,
+    user_language,
+    user_word_history,
+)
 from src.core.config import DAILY_LIMIT
+from src.core.i18n import get_lang
 from src.core.texts import format_date, format_word
 from src.data.api_words import COMMON_WORDS, get_word_data
 from src.data.level_words import extract_headword as _extract_headword
@@ -23,7 +35,7 @@ from src.database.models import (
     get_wordset_progress,
     set_user_level,
 )
-from src.utils.utils import safe_edit_text
+from src.utils.utils import is_unlimited_user, safe_edit_text
 
 
 def _next_level(level: str) -> str | None:
@@ -37,21 +49,25 @@ def _next_level(level: str) -> str | None:
     return order[idx + 1]
 
 
-def _build_levels_lock_text(current_level: str, placement_done: bool, unlock_all: bool = False) -> str:
+def _build_levels_lock_text(current_level: str, placement_done: bool, unlock_all: bool = False, lang: str = "hy") -> str:
     levels = ("A1", "A2", "B1", "B2")
-    lines = ["📚 Level Map", ""]
+    title = {"hy": "📚 Level Map", "ru": "📚 Карта уровней", "en": "📚 Level Map"}.get(lang, "📚 Level Map")
+    lines = [title, ""]
     if not placement_done:
-        lines.append("Placement test-ը դեռ ավարտված չէ։")
+        not_done = {"hy": "Placement test-ը դեռ ավարտված չէ։", "ru": "Placement test ещё не пройден.", "en": "Placement test not completed yet."}.get(lang, "Placement test not completed yet.")
+        start_hint = {"hy": "Սկսելու համար՝ /placement", "ru": "Чтобы начать: /placement", "en": "To start: /placement"}.get(lang, "To start: /placement")
+        lines.append(not_done)
         for lvl in levels:
             lines.append(f"🔒 {lvl}")
         lines.append("")
-        lines.append("Սկսելու համար՝ /placement")
+        lines.append(start_hint)
         return "\n".join(lines)
 
+    cur_label = {"hy": "Ընթացիկ բացված մակարդակ", "ru": "Текущий открытый уровень", "en": "Current unlocked level"}.get(lang, "Current unlocked level")
     if unlock_all:
-        lines.append("Current unlocked level: ALL (admin)")
+        lines.append(f"{cur_label}: ALL (admin)")
     else:
-        lines.append(f"Current unlocked level: {current_level}")
+        lines.append(f"{cur_label}: {current_level}")
     for lvl in levels:
         badge = "🔓" if unlock_all or lvl == current_level else "🔒"
         lines.append(f"{badge} {lvl}")
@@ -71,22 +87,17 @@ def _grade_tag(grade: str | None) -> str:
     return "⚪ New"
 
 
-def _build_story_intro_text(words: list[str]) -> str:
-    words_line = ", ".join(words[:10]) if words else "—"
-    return (
-        "📖 Contextual Story Mode\n\n"
-        "Ընտրիր ժանրը, և ես կստեղծեմ կարճ պատմություն այսօրվա բառերով։\n"
-        f"Target words: {words_line}"
-    )
+from src.core.i18n import get_lang, t
 
 
-def _build_palace_intro_text(words: list[str]) -> str:
+def _build_story_intro_text(words: list[str], lang: str = "hy") -> str:
     words_line = ", ".join(words[:10]) if words else "—"
-    return (
-        "🧠 Personal Memory Palace\n\n"
-        "Ընտրիր թեման, և ես կստեղծեմ տեսողական հիշողության «սենյակ» հենց այսօրվա բառերով։\n"
-        f"Target words: {words_line}"
-    )
+    return t("story_intro", lang, words=words_line)
+
+
+def _build_palace_intro_text(words: list[str], lang: str = "hy") -> str:
+    words_line = ", ".join(words[:10]) if words else "—"
+    return t("palace_intro", lang, words=words_line)
 
 
 def _parse_story_translation_pairs(raw: str) -> dict[str, str]:
@@ -116,8 +127,17 @@ async def _build_story_glossary_text(words: list[str], user_id: int | None = Non
         return "📘 Glossary\n- —"
 
     overrides = story_translation_overrides.get(int(user_id or 0), {}) if user_id else {}
-    tasks = [get_word_data(w) for w in uniq_words]
-    rows = await asyncio.gather(*tasks, return_exceptions=True)
+
+    async def _safe_get(w: str):
+        try:
+            return await get_word_data(w)
+        except Exception as e:
+            return e
+
+    async with asyncio.TaskGroup() as tg:
+        tasks = [tg.create_task(_safe_get(w)) for w in uniq_words]
+    rows = [t.result() for t in tasks]
+
     lines = ["📘 Glossary"]
     for w, row in zip(uniq_words, rows, strict=False):
         custom = (overrides.get(w) or "").strip()
@@ -132,8 +152,12 @@ async def _build_story_glossary_text(words: list[str], user_id: int | None = Non
 
 
 async def send_next_word_card(message: Message | CallbackQuery, user_id: int, level: str) -> bool:
-    from src.utils.utils import is_unlimited_user  # circular
     msg_target = message.message if isinstance(message, CallbackQuery) else message
+    chat_id = msg_target.chat.id
+
+    # 1. Clean up temporary messages from previous word and reset waiting states
+    clear_user_waiting_states(user_id)
+    await cleanup_user_temp_messages(msg_target.bot, chat_id, user_id)
 
     daily_count = await get_daily_count(user_id)
     if not is_unlimited_user(user_id) and daily_count >= DAILY_LIMIT:
@@ -158,16 +182,83 @@ async def send_next_word_card(message: Message | CallbackQuery, user_id: int, le
         await msg_target.answer("❗ Այս պահին հաջորդ բառ չի գտնվել։ Փորձեք կրկին քիչ հետո։")
         return False
 
+    # 2. Save previous session to history
+    if user_id in current_word_session and current_word_session[user_id].get("word"):
+        if user_id not in user_word_history:
+            user_word_history[user_id] = []
+        user_word_history[user_id].append(current_word_session[user_id])
+        if len(user_word_history[user_id]) > 20:
+            user_word_history[user_id].pop(0)
+
+    # 3. Set new current session
+    current_word_session[user_id] = {"word": word, "level": level, "actions": []}
+
     word_data = await get_word_data(word, level=level)
     reason = await get_word_reason(user_id, word)
     daily_limit_display = DAILY_LIMIT if not is_unlimited_user(user_id) else max(DAILY_LIMIT, daily_count + 1)
     text = format_word(word_data, daily_count + 1, daily_limit_display, level, reason)
-    markup = get_word_keyboard(word)
+    has_back = bool(user_word_history.get(user_id))
+    lang = get_lang(user_id)
+    markup = get_word_keyboard(word, has_back=has_back, lang=lang)
     if msg_target.from_user and msg_target.from_user.is_bot:
         await safe_edit_text(msg_target, text, reply_markup=markup)
     else:
         await msg_target.answer(text, reply_markup=markup)
     last_presented_words[user_id] = word
+    return True
+
+
+async def send_previous_word_card(message: Message | CallbackQuery, user_id: int) -> bool:
+    msg_target = message.message if isinstance(message, CallbackQuery) else message
+    chat_id = msg_target.chat.id
+
+    # 1. Clean up current word's temp messages
+    await cleanup_user_temp_messages(msg_target.bot, chat_id, user_id)
+
+    # 2. Get previous word session from history
+    history = user_word_history.get(user_id, [])
+    if not history:
+        await msg_target.answer("❗ Նախորդ բառ չի գտնվել։")
+        return False
+
+    prev_session = history.pop()
+    word = prev_session["word"]
+    level = prev_session["level"]
+    saved_actions = prev_session.get("actions", [])
+
+    # Set as current session
+    current_word_session[user_id] = {
+        "word": word,
+        "level": level,
+        "actions": list(saved_actions),
+    }
+
+    # 3. Present previous word card
+    daily_count = await get_daily_count(user_id)
+    daily_limit_display = DAILY_LIMIT if not is_unlimited_user(user_id) else max(DAILY_LIMIT, daily_count + 1)
+    word_data = await get_word_data(word, level=level)
+    reason = await get_word_reason(user_id, word)
+    text = format_word(word_data, daily_count, daily_limit_display, level, reason)
+
+    markup = get_word_keyboard(word, has_back=len(history) > 0)
+    if msg_target.from_user and msg_target.from_user.is_bot:
+        await safe_edit_text(msg_target, text, reply_markup=markup)
+    else:
+        await msg_target.answer(text, reply_markup=markup)
+    last_presented_words[user_id] = word
+
+    # 4. Restore saved actions!
+    for action in saved_actions:
+        try:
+            if action.get("type") == "text":
+                sent = await msg_target.answer(action["text"], parse_mode=action.get("parse_mode"))
+                record_temp_message(user_id, sent.message_id)
+            elif action.get("type") == "audio" and action.get("file_id"):
+                sent = await msg_target.bot.send_voice(chat_id, action["file_id"])
+                record_temp_message(user_id, sent.message_id)
+        except Exception as e:
+            logging.warning(f"Failed to restore action {action}: {e}")
+
     return True
 
 
@@ -197,9 +288,13 @@ async def maybe_promote_level(user_id: int, message: Message | None = None) -> s
 
 async def send_review_list(message: Message, user_id: int) -> bool:
     words = await get_hard_words(user_id)
+    lang = get_lang(user_id)
     if not words:
         review_sessions.pop(user_id, None)
-        await message.answer("✨ Հիանալի աշխատանք․ սովորելու բառ չունես։ /word 🚀")
+        await message.answer(
+            t("no_words_available", lang),
+            reply_markup=get_start_new_word_keyboard(lang)
+        )
         return False
 
     words_only = [w["word"] for w in words if w.get("word")]

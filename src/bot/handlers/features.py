@@ -14,9 +14,9 @@ from src.core.config import (
     PALACE_THEMES,
     STORY_GENRES,
 )
+from src.core.i18n import get_lang, t
 from src.core.texts import format_searched_word
 from src.data.api_words import (
-    _get_http_session,
     extract_headword,
     generate_contextual_story,
     generate_memory_palace_text,
@@ -57,6 +57,9 @@ async def search_handler(message: Message):
     if await reject_if_banned_message(message):
         return
 
+    user_id = message.from_user.id
+    lang = get_lang(user_id)
+
     parts = (message.text or "").split(maxsplit=1)
     if len(parts) > 1 and parts[1].strip():
         query = extract_headword(parts[1].strip())
@@ -65,8 +68,8 @@ async def search_handler(message: Message):
         word_data = await get_word_data(query, level=level)
         await message.answer(format_searched_word(word_data, levels), reply_markup=get_search_keyboard(query))
     else:
-        search_waiting_users.add(message.from_user.id)
-        await message.answer("Գրեք փնտրվող բառը։\nՉեղարկելու համար գրեք՝ cancel")
+        search_waiting_users.add(user_id)
+        await message.answer(t("search_prompt", lang))
 
 @router.message(F.from_user.id.in_(search_waiting_users) & F.text & ~F.text.startswith('/'))
 async def search_text_handler(message: Message):
@@ -74,14 +77,15 @@ async def search_text_handler(message: Message):
         return
     user_id = message.from_user.id
     search_waiting_users.discard(user_id)
+    lang = get_lang(user_id)
 
     text = (message.text or "").strip()
     if text.lower() in ("cancel", "exit", "չեղարկել"):
-        await message.answer("❌ Որոնումը չեղարկվեց։")
+        await message.answer(t("search_cancelled", lang))
         return
 
     query = extract_headword(text)
-    await message.answer(f"🔎 Փնտրում եմ՝ {query}...")
+    await message.answer(t("searching", lang, query=query))
     levels = find_word_levels(query)
     level = levels[0] if levels else ""
     word_data = await get_word_data(query, level=level)
@@ -95,7 +99,7 @@ async def example_handler(message: Message):
 
     parts = (message.text or "").split(maxsplit=1)
     if len(parts) < 2 or not parts[1].strip():
-        await message.answer("Օգտագործում՝ /example achieve")
+        await message.answer("Usage: /example achieve")
         return
 
     query = extract_headword(parts[1].strip())
@@ -111,15 +115,16 @@ async def story_handler(message: Message):
     if await reject_if_banned_message(message):
         return
     user_id = message.from_user.id
+    lang = get_lang(user_id)
     is_unlimited = is_unlimited_user(user_id)
     if not is_unlimited and await count_story_generations_today(user_id) >= DAILY_STORY_LIMIT:
-        await message.answer("📖 Այսօրվա Story limit-ը լրացել է։")
+        await message.answer(t("story_limit_reached", lang))
         return
     words = await get_today_answered_words(user_id, limit=10)
     if not is_unlimited and len(words) < 3:
-        await message.answer("📖 Story mode-ի համար այսօրվա առնվազն 3 բառ պետք է անցած լինի։")
+        await message.answer(t("story_need_words", lang))
         return
-    await message.answer(_build_story_intro_text(words), reply_markup=get_story_genre_keyboard())
+    await message.answer(_build_story_intro_text(words, lang=lang), reply_markup=get_story_genre_keyboard())
 
 @router.callback_query(F.data.startswith("story:genre:"))
 async def story_callback_handler(callback: CallbackQuery):
@@ -127,15 +132,16 @@ async def story_callback_handler(callback: CallbackQuery):
     if await reject_if_banned_callback(callback):
         return
     user_id = callback.from_user.id
+    lang = get_lang(user_id)
 
     genre_key = (callback.data or "").split(":")[-1]
     genre_name = STORY_GENRES.get(genre_key)
     if not genre_name:
-        await callback.answer("Սխալ ժանր", show_alert=True)
+        await callback.answer("Invalid genre", show_alert=True)
         return
 
     words = await get_today_answered_words(user_id, limit=10)
-    await callback.answer("Պատմությունը գեներացվում է... ⏳")
+    await callback.answer(t("story_generating", lang))
     level = await get_user_level(user_id)
     story_text = await generate_contextual_story(words, genre_name, level)
     glossary_text = await _build_story_glossary_text(words, user_id=user_id)
@@ -150,15 +156,16 @@ async def palace_handler(message: Message):
     if await reject_if_banned_message(message):
         return
     user_id = message.from_user.id
+    lang = get_lang(user_id)
     is_unlimited = is_unlimited_user(user_id)
     if not is_unlimited and await count_palace_generations_today(user_id) >= DAILY_PALACE_LIMIT:
-        await message.answer("🧠 Այսօրվա Palace limit-ը լրացել է։")
+        await message.answer(t("palace_limit_reached", lang))
         return
     words = await get_today_answered_words(user_id, limit=10)
     if not is_unlimited and len(words) < 3:
-        await message.answer("🧠 Memory Palace-ի համար այսօրվա առնվազն 3 բառ պետք է անցած լինի։")
+        await message.answer(t("palace_need_words", lang))
         return
-    await message.answer(_build_palace_intro_text(words), reply_markup=get_palace_theme_keyboard())
+    await message.answer(_build_palace_intro_text(words, lang=lang), reply_markup=get_palace_theme_keyboard())
 
 @router.callback_query(F.data.startswith("palace:theme:"))
 async def palace_callback_handler(callback: CallbackQuery):
@@ -166,15 +173,16 @@ async def palace_callback_handler(callback: CallbackQuery):
     if await reject_if_banned_callback(callback):
         return
     user_id = callback.from_user.id
+    lang = get_lang(user_id)
 
     theme_key = (callback.data or "").split(":")[-1]
     theme_name = PALACE_THEMES.get(theme_key)
     if not theme_name:
-        await callback.answer("Սխալ թեմա", show_alert=True)
+        await callback.answer("Invalid theme", show_alert=True)
         return
 
     words = await get_today_answered_words(user_id, limit=10)
-    await callback.answer("Memory Palace-ը գեներացվում է... ⏳")
+    await callback.answer(t("palace_generating", lang))
     level = await get_user_level(user_id)
     palace_text = await generate_memory_palace_text(words, theme_name, level)
     glossary_text = await _build_story_glossary_text(words, user_id=user_id)
@@ -265,13 +273,16 @@ async def explain_handler(message: Message):
     if await reject_if_banned_message(message):
         return
 
+    user_id = message.from_user.id
+    lang = get_lang(user_id)
+
     parts = (message.text or "").split(maxsplit=1)
     if len(parts) > 1 and parts[1].strip():
         query = parts[1].strip()
         await _process_explanation(message, query)
     else:
-        explain_waiting_users.add(message.from_user.id)
-        await message.answer("🧐 Ի՞նչն եք ցանկանում բացատրել (բառ, արտահայտություն կամ քերականություն)։\nՕրինակ՝ 'make vs do' կամ 'get used to':\nՉեղարկելու համար գրեք՝ cancel")
+        explain_waiting_users.add(user_id)
+        await message.answer(t("explain_prompt", lang))
 
 @router.message(F.from_user.id.in_(explain_waiting_users) & F.text & ~F.text.startswith('/'))
 async def explain_text_handler(message: Message):
@@ -279,10 +290,11 @@ async def explain_text_handler(message: Message):
         return
     user_id = message.from_user.id
     explain_waiting_users.discard(user_id)
+    lang = get_lang(user_id)
 
     text = (message.text or "").strip()
     if text.lower() in ("cancel", "exit", "չեղարկել"):
-        await message.answer("❌ Բացատրությունը չեղարկվեց։")
+        await message.answer(t("explain_cancelled", lang))
         return
 
     await _process_explanation(message, text)
@@ -290,13 +302,16 @@ async def explain_text_handler(message: Message):
 async def _process_explanation(message: Message, query: str):
     from src.database.models import get_user_level  # circular
     user_id = message.from_user.id
+    lang = get_lang(user_id)
 
-    await message.answer(f"🧐 Մտածում եմ `{query}`-ի մասին... ⏳")
+    await message.answer(t("explain_thinking", lang, query=query))
 
     level = await get_user_level(user_id)
-    session = await _get_http_session()
 
-    explanation = await get_tutor_explanation_gemini(session, query, level=level)
+    explanation = await get_tutor_explanation_gemini(query, level=level)
 
     for chunk in _chunk_text(explanation):
-        await message.answer(chunk, parse_mode="Markdown")
+        try:
+            await message.answer(chunk, parse_mode="Markdown")
+        except Exception:
+            await message.answer(chunk)

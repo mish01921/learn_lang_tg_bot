@@ -1,13 +1,33 @@
-
 from aiogram.types import (
     InlineKeyboardButton,
     InlineKeyboardMarkup,
     KeyboardButton,
     ReplyKeyboardMarkup,
 )
+from src.core.i18n import t
 
 
-def get_main_menu_keyboard() -> ReplyKeyboardMarkup:
+def get_language_selector() -> InlineKeyboardMarkup:
+    """Keyboard for choosing interface language."""
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(text="🇦🇲 Հայերեն", callback_data="set_lang:hy"),
+                InlineKeyboardButton(text="🇷🇺 Русский", callback_data="set_lang:ru"),
+                InlineKeyboardButton(text="🇬🇧 English", callback_data="set_lang:en"),
+            ]
+        ]
+    )
+
+
+def get_start_new_word_keyboard(lang: str = "hy") -> InlineKeyboardMarkup:
+    """Inline CTA keyboard offering instant action to start new words."""
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text=t("btn_new_word", lang), callback_data="word:next")]
+        ]
+    )
+
     return ReplyKeyboardMarkup(
         keyboard=[
             [KeyboardButton(text="🗺 Roadmap"), KeyboardButton(text="👨‍🏫 Coach")],
@@ -37,28 +57,33 @@ def get_daily_roadmap_keyboard(steps: list[dict]) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
-def get_word_keyboard(word: str) -> InlineKeyboardMarkup:
+def get_word_keyboard(word: str, has_back: bool = False, lang: str = "hy") -> InlineKeyboardMarkup:
+    nav_row = []
+    if has_back:
+        nav_row.append(InlineKeyboardButton(text=t("btn_back_word", lang), callback_data="word:back"))
+    nav_row.append(InlineKeyboardButton(text=t("btn_next_word", lang), callback_data="word:next"))
+
     return InlineKeyboardMarkup(
         inline_keyboard=[
             [
-                InlineKeyboardButton(text="🇺🇸 Listen (US)", callback_data=f"audio:us:{word}"),
-                InlineKeyboardButton(text="🇬🇧 Listen (UK)", callback_data=f"audio:uk:{word}"),
+                InlineKeyboardButton(text=t("btn_listen_us", lang), callback_data=f"audio:us:{word}"),
+                InlineKeyboardButton(text=t("btn_listen_uk", lang), callback_data=f"audio:uk:{word}"),
             ],
             [
-                InlineKeyboardButton(text="🎙️ Test my Voice", callback_data=f"word:pronounce:{word}"),
+                InlineKeyboardButton(text=t("btn_test_voice", lang), callback_data=f"word:pronounce:{word}"),
             ],
             [
-                InlineKeyboardButton(text="❌ Again", callback_data=f"word:again:{word}"),
-                InlineKeyboardButton(text="🟠 Hard", callback_data=f"word:hard:{word}"),
+                InlineKeyboardButton(text=t("btn_again", lang), callback_data=f"word:again:{word}"),
+                InlineKeyboardButton(text=t("btn_hard", lang), callback_data=f"word:hard:{word}"),
             ],
             [
-                InlineKeyboardButton(text="✅ Good", callback_data=f"word:good:{word}"),
-                InlineKeyboardButton(text="🚀 Easy", callback_data=f"word:easy:{word}"),
+                InlineKeyboardButton(text=t("btn_good", lang), callback_data=f"word:good:{word}"),
+                InlineKeyboardButton(text=t("btn_easy", lang), callback_data=f"word:easy:{word}"),
             ],
             [
-                InlineKeyboardButton(text="🧠 Կիրառել (Practice)", callback_data=f"word:practice:{word}"),
-                InlineKeyboardButton(text="⏭️ Հաջորդը", callback_data="word:next"),
+                InlineKeyboardButton(text=t("btn_practice", lang), callback_data=f"word:practice:{word}"),
             ],
+            nav_row,
         ]
     )
 
@@ -258,9 +283,22 @@ def get_pronunciation_feedback_keyboard(word: str, score: int) -> InlineKeyboard
     ]
     # Add YouGlish button for visual aid
     buttons.append(InlineKeyboardButton(text="📺 See Video", url=f"https://youglish.com/pronounce/{word}/english"))
-    
+
     # Show "Next Word" only if score is 85 or higher
     if score >= 85:
         buttons.append(InlineKeyboardButton(text="⏭️ Next Word", callback_data="word:next"))
-    
+
     return InlineKeyboardMarkup(inline_keyboard=[buttons])
+
+def get_main_menu_keyboard(lang: str = "hy") -> ReplyKeyboardMarkup:
+    """Main persistent menu used after /start. Language-aware."""
+    return ReplyKeyboardMarkup(
+        keyboard=[
+            [KeyboardButton(text=t("btn_roadmap", lang)), KeyboardButton(text=t("btn_coach", lang))],
+            [KeyboardButton(text=t("btn_new_word", lang)), KeyboardButton(text=t("btn_pomodoro", lang))],
+            [KeyboardButton(text=t("btn_stats", lang)), KeyboardButton(text=t("btn_help", lang))],
+            [KeyboardButton(text=t("btn_language", lang))],
+        ],
+        resize_keyboard=True,
+        persistent=True,
+    )

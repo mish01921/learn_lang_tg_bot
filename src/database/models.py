@@ -1,381 +1,464 @@
+import asyncio
 import json
-import logging
-import re
+from contextlib import asynccontextmanager
 from datetime import datetime, timedelta
+from typing import Any
+from urllib.parse import unquote
 
-import asyncpg
+from sqlalchemy import (
+    BigInteger,
+    Float,
+    ForeignKey,
+    Index,
+    Integer,
+    Text,
+    UniqueConstraint,
+    asc,
+    case,
+    delete,
+    desc,
+    func,
+    insert,
+    select,
+    text,
+    update,
+)
+from sqlalchemy.dialects.postgresql import insert as pg_insert
+from sqlalchemy.dialects.sqlite import insert as sqlite_insert
+from sqlalchemy.ext.asyncio import (
+    AsyncEngine,
+    AsyncSession,
+    async_sessionmaker,
+    create_async_engine,
+)
+from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 from src.core.config import DATABASE_URL
 
-ADMIN_AUDIT_TABLE = "admin.audit_log"
-ADMIN_SETTINGS_TABLE = "admin.settings"
+
+def _is_sqlite_dsn(dsn: str) -> bool:
+    if not dsn:
+        return True
+    return dsn.startswith("sqlite") or "://" not in dsn
 
 
-class _PgCursor:
-    def __init__(self, rows: list | None = None, rowcount: int = 0, lastrowid: int | None = None):
-        self._rows = rows or []
-        self._idx = 0
-        self.rowcount = int(rowcount or 0)
-        self.lastrowid = lastrowid
+def _sqlite_path_from_dsn(dsn: str) -> str:
+    if not dsn or dsn == "sqlite:///:memory:":
+        return ":memory:"
+    if dsn.startswith("sqlite:///"):
+        path = dsn[len("sqlite:///") :]
+    elif dsn.startswith("sqlite://"):
+        path = dsn[len("sqlite://") :]
+    else:
+        path = dsn
+    return unquote(path)
+
+
+ADMIN_AUDIT_TABLE = "admin_audit_log" if _is_sqlite_dsn(DATABASE_URL) else "admin.audit_log"
+ADMIN_SETTINGS_TABLE = "admin_settings" if _is_sqlite_dsn(DATABASE_URL) else "admin.settings"
+
+
+class Base(DeclarativeBase):
+    pass
+
+
+class User(Base):
+    __tablename__ = "users"
+
+    user_id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    username: Mapped[str | None] = mapped_column(Text, nullable=True)
+    joined_at: Mapped[str | None] = mapped_column(Text, nullable=True)
+    streak: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    last_active: Mapped[str | None] = mapped_column(Text, nullable=True)
+    daily_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    daily_date: Mapped[str | None] = mapped_column(Text, nullable=True)
+    user_level: Mapped[str | None] = mapped_column(Text, nullable=True)
+    language: Mapped[str | None] = mapped_column(Text, nullable=True, default='hy')
+    banned: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    ban_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    placement_done: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    placement_score: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    placement_taken_at: Mapped[str | None] = mapped_column(Text, nullable=True)
+    study_plan: Mapped[str] = mapped_column(Text, default='steady')
+
+
+class WordProgress(Base):
+    __tablename__ = "word_progress"
+    __table_args__ = (
+        UniqueConstraint("user_id", "word", name="uq_word_progress_user_word"),
+        Index("idx_progress_user", "user_id"),
+        Index("idx_progress_review", "user_id", "next_review"),
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("users.user_id", ondelete="CASCADE"), nullable=False)
+    word: Mapped[str] = mapped_column(Text, nullable=False)
+    level: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    seen: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    correct: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    correct_streak: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    wrong: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    learned: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    marked_hard: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    marked_know: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    added_at: Mapped[str | None] = mapped_column(Text, nullable=True)
+    learned_at: Mapped[str | None] = mapped_column(Text, nullable=True)
+    next_review: Mapped[str | None] = mapped_column(Text, nullable=True)
+    ease_factor: Mapped[float] = mapped_column(Float, nullable=False, default=2.5)
+    interval_days: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    repetitions: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    last_reviewed_at: Mapped[str | None] = mapped_column(Text, nullable=True)
+    last_grade: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+
+class Session(Base):
+    __tablename__ = "sessions"
+    __table_args__ = (Index("idx_sessions_user", "user_id"),)
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("users.user_id", ondelete="CASCADE"), nullable=False)
+    word: Mapped[str] = mapped_column(Text, nullable=False)
+    answered_at: Mapped[str] = mapped_column(Text, nullable=False)
+    correct: Mapped[int] = mapped_column(Integer, nullable=False)
+
+
+class StoryHistory(Base):
+    __tablename__ = "story_history"
+    __table_args__ = (Index("idx_story_user_date", "user_id", "story_date"),)
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("users.user_id", ondelete="CASCADE"), nullable=False)
+    story_date: Mapped[str] = mapped_column(Text, nullable=False)
+    genre: Mapped[str] = mapped_column(Text, nullable=False)
+    words_json: Mapped[str] = mapped_column(Text, nullable=False)
+    story_text: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[str] = mapped_column(Text, nullable=False)
+
+
+class MemoryPalaceHistory(Base):
+    __tablename__ = "memory_palace_history"
+    __table_args__ = (Index("idx_palace_user_date", "user_id", "palace_date"),)
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("users.user_id", ondelete="CASCADE"), nullable=False)
+    palace_date: Mapped[str] = mapped_column(Text, nullable=False)
+    theme: Mapped[str] = mapped_column(Text, nullable=False)
+    words_json: Mapped[str] = mapped_column(Text, nullable=False)
+    palace_text: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[str] = mapped_column(Text, nullable=False)
+
+
+class WordAudioCache(Base):
+    __tablename__ = "word_audio_cache"
+
+    word: Mapped[str] = mapped_column(Text, primary_key=True)
+    file_id: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[str] = mapped_column(Text, nullable=False)
+
+
+class AuditLog(Base):
+    __tablename__ = "admin_audit_log" if _is_sqlite_dsn(DATABASE_URL) else "audit_log"
+    __table_args__ = {"schema": None if _is_sqlite_dsn(DATABASE_URL) else "admin"}
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    actor_user_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    target_user_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    action: Mapped[str] = mapped_column(Text, nullable=False)
+    details: Mapped[str | None] = mapped_column(Text, nullable=True)
+    metadata_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[str] = mapped_column(Text, nullable=False)
+
+
+class Setting(Base):
+    __tablename__ = "admin_settings" if _is_sqlite_dsn(DATABASE_URL) else "settings"
+    __table_args__ = {"schema": None if _is_sqlite_dsn(DATABASE_URL) else "admin"}
+
+    key: Mapped[str] = mapped_column(Text, primary_key=True)
+    value: Mapped[str] = mapped_column(Text, nullable=False)
+    updated_at: Mapped[str] = mapped_column(Text, nullable=False)
+
+
+_async_engine: AsyncEngine | None = None
+_async_session_factory: async_sessionmaker[AsyncSession] | None = None
+
+
+async def init_db_pool():
+    global _async_engine, _async_session_factory
+    if _async_engine is not None:
+        return
+    url = DATABASE_URL
+    if url.startswith("postgresql://") or url.startswith("postgres://"):
+        url = url.replace("postgres://", "postgresql+asyncpg://").replace("postgresql://", "postgresql+asyncpg://")
+    elif _is_sqlite_dsn(url):
+        if url.startswith("sqlite://"):
+            url = url.replace("sqlite://", "sqlite+aiosqlite://")
+        else:
+            url = f"sqlite+aiosqlite:///{url}"
+
+    if _is_sqlite_dsn(DATABASE_URL):
+        _async_engine = create_async_engine(url, echo=False)
+    else:
+        _async_engine = create_async_engine(url, pool_size=20, max_overflow=0, echo=False)
+
+    _async_session_factory = async_sessionmaker(_async_engine, expire_on_commit=False, class_=AsyncSession)
+
+
+async def close_db_pool():
+    global _async_engine, _async_session_factory
+    if _async_engine is not None:
+        await _async_engine.dispose()
+        _async_engine = None
+        _async_session_factory = None
+
+
+class _Record(dict):
+    def __init__(self, row, mapping):
+        super().__init__(mapping)
+        self._row = row
+
+    def __getitem__(self, key):
+        if isinstance(key, int):
+            return self._row[key]
+        return super().__getitem__(key)
+
+    def __getattr__(self, key):
+        try:
+            return self[key]
+        except KeyError:
+            raise AttributeError(key) from None
+
+
+class _CursorWrapper:
+    def __init__(self, result):
+        self._result = result
+        self.rowcount = result.rowcount
+
+    def _wrap_row(self, row):
+        if row is None:
+            return None
+        return _Record(row, row._mapping)
 
     async def fetchone(self):
-        if self._idx >= len(self._rows):
-            return None
-        row = self._rows[self._idx]
-        self._idx += 1
-        return row
+        return self._wrap_row(self._result.first())
 
     async def fetchall(self):
-        if self._idx <= 0:
-            return list(self._rows)
-        return list(self._rows[self._idx :])
+        return [self._wrap_row(r) for r in self._result.all()]
 
-    def __aiter__(self):
+    async def __aenter__(self):
         return self
 
-    async def __anext__(self):
-        row = await self.fetchone()
-        if row is None:
-            raise StopAsyncIteration
-        return row
+    async def __aexit__(self, exc_type, exc_val, exc_tb):
+        pass
 
 
-class _PgExecuteContext:
-    def __init__(self, conn: "_PgConnection", sql: str, params: tuple | list | None = None):
-        self._conn = conn
-        self._sql = sql
-        self._params = tuple(params or ())
-        self._cursor: _PgCursor | None = None
+class _ExecuteWrapper:
+    def __init__(self, session, statement, params=None):
+        self._session = session
+        self._statement = statement
+        self._params = params
 
     def __await__(self):
         return self._run().__await__()
 
+    async def _run(self):
+        if self._params is not None:
+            return await self._session.execute(self._statement, self._params)
+        return await self._session.execute(self._statement)
+
     async def __aenter__(self):
-        return await self._run()
+        res = await self._run()
+        return _CursorWrapper(res)
 
-    async def __aexit__(self, exc_type, exc, tb):
-        return False
-
-    async def _run(self) -> _PgCursor:
-        if self._cursor is None:
-            self._cursor = await self._conn._execute_internal(self._sql, self._params)
-        return self._cursor
+    async def __aexit__(self, exc_type, exc_val, exc_tb):
+        pass
 
 
-class _PgConnection:
-    def __init__(self, dsn: str):
-        self._dsn = dsn
-        self._conn: asyncpg.Connection | None = None
+class _AsyncSessionContext:
+    def __init__(self, session: AsyncSession):
+        self._session = session
         self.row_factory = None
 
-    async def __aenter__(self):
-        dsn = self._dsn
-        if not dsn or not dsn.startswith("postgres"):
-            raise ValueError("Invalid or empty DATABASE_URL for PostgreSQL.")
+    def execute(self, statement: Any, params: Any = None) -> Any:
+        if isinstance(statement, str):
+            if params is not None and isinstance(params, (tuple, list)) and (not params or not isinstance(params[0], dict)):
+                new_params = {}
+                parts = statement.split("?")
+                new_stmt = []
+                for i in range(len(parts) - 1):
+                    new_stmt.append(parts[i])
+                    param_name = f"p_{i}"
+                    new_stmt.append(f":{param_name}")
+                    new_params[param_name] = params[i]
+                new_stmt.append(parts[-1])
+                statement = "".join(new_stmt)
+                params = new_params
+            statement = text(statement)
+        return _ExecuteWrapper(self._session, statement, params)
 
-        # Log the DSN for debugging, but hide the password
-        safe_dsn = re.sub(r"://[^@/]+@", "://<user>:<password>@", dsn)
-        logging.info(f"Connecting to PostgreSQL with DSN: {safe_dsn}")
+    async def commit(self) -> None:
+        await self._session.commit()
 
-        if dsn.startswith("postgresql+asyncpg://"):
-            dsn = "postgresql://" + dsn[len("postgresql+asyncpg://") :]
-        elif dsn.startswith("postgres+asyncpg://"):
-            dsn = "postgres://" + dsn[len("postgres+asyncpg://") :]
+    async def rollback(self) -> None:
+        await self._session.rollback()
+
+    async def close(self) -> None:
+        await self._session.close()
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._session, name)
+
+
+@asynccontextmanager
+async def _db_connect():
+    if _async_session_factory is None:
+        await init_db_pool()
+    assert _async_session_factory is not None
+    async with _async_session_factory() as session:
+        wrapper = _AsyncSessionContext(session)
         try:
-            self._conn = await asyncpg.connect(dsn)
-        except Exception as e:
-            logging.error(f"Failed to connect to PostgreSQL: {e}")
-            raise
-        return self
-
-    async def __aexit__(self, exc_type, exc, tb):
-        if self._conn is not None:
-            await self._conn.close()
-        self._conn = None
-        return False
-
-    def execute(self, sql: str, params: tuple | list | None = None):
-        return _PgExecuteContext(self, sql, params)
-
-    async def commit(self):
-        # asyncpg auto-commits outside explicit transactions.
-        return None
-
-    async def _execute_internal(self, sql: str, params: tuple):
-        assert self._conn is not None
-        pg_sql, pg_params = _translate_sql_for_postgres(sql, params)
-        if not pg_sql:
-            return _PgCursor()
-
-        up = pg_sql.strip().upper()
-        is_select = up.startswith("SELECT") or up.startswith("WITH")
-        has_returning = " RETURNING " in f" {up} "
-
-        if is_select or has_returning:
-            rows = await self._conn.fetch(pg_sql, *pg_params)
-            lastrowid = None
-            if has_returning and rows:
-                first = rows[0]
-                if "id" in first:
-                    lastrowid = int(first["id"])
-                elif len(first) > 0:
-                    lastrowid = int(first[0])
-            return _PgCursor(rows=list(rows), rowcount=len(rows), lastrowid=lastrowid)
-
-        status = await self._conn.execute(pg_sql, *pg_params)
-        rowcount = 0
-        m = re.search(r"(\d+)$", status or "")
-        if m:
-            rowcount = int(m.group(1))
-        return _PgCursor(rowcount=rowcount)
-
-
-def _translate_sql_for_postgres(sql: str, params: tuple) -> tuple[str, tuple]:
-    raw = (sql or "").strip()
-    if not raw:
-        return "", params
-    up = raw.upper()
-    if up.startswith("PRAGMA "):
-        return "", params
-
-    # SQLite-specific upsert style
-    if "INSERT OR IGNORE INTO" in up:
-        raw = re.sub(r"INSERT\s+OR\s+IGNORE\s+INTO", "INSERT INTO", raw, flags=re.IGNORECASE)
-        raw = f"{raw} ON CONFLICT DO NOTHING"
-
-    idx = 0
-
-    def repl(_):
-        nonlocal idx
-        idx += 1
-        return f"${idx}"
-
-    raw = re.sub(r"\?", repl, raw)
-    return raw, params
-
-
-def _db_connect():
-    return _PgConnection(DATABASE_URL)
-
-# ═══════════════════════════════════════════════════════
-# INIT
-# ═══════════════════════════════════════════════════════
-
-async def _init_postgres_schema():
-    """Creates all tables and indexes for PostgreSQL if they don't exist."""
-    async with _db_connect() as db:
-        # Create admin schema if it doesn't exist
-        await db.execute("CREATE SCHEMA IF NOT EXISTS admin")
-
-        # Users table
-        await db.execute("""
-            CREATE TABLE IF NOT EXISTS users (
-                user_id         BIGINT PRIMARY KEY,
-                username        TEXT,
-                joined_at       TEXT,
-                streak          INTEGER DEFAULT 0,
-                last_active     TEXT,
-                daily_count     INTEGER DEFAULT 0,
-                daily_date      TEXT,
-                user_level      TEXT,
-                banned          INTEGER DEFAULT 0,
-                ban_reason      TEXT,
-                placement_done  INTEGER DEFAULT 0,
-                placement_score INTEGER DEFAULT 0,
-                placement_taken_at TEXT,
-                study_plan      TEXT DEFAULT 'steady'
-            )
-        """)
-        # Migration
-        try:
-            await db.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS study_plan TEXT DEFAULT 'steady'")
+            yield wrapper
+            await session.commit()
         except Exception:
-            pass
+            await session.rollback()
+            raise
 
-        # word_progress table
-        await db.execute("""
-            CREATE TABLE IF NOT EXISTS word_progress (
-                id              SERIAL PRIMARY KEY,
-                user_id         BIGINT NOT NULL,
-                word            TEXT NOT NULL,
-                level           INTEGER DEFAULT 0,
-                seen            INTEGER DEFAULT 0,
-                correct         INTEGER DEFAULT 0,
-                correct_streak  INTEGER DEFAULT 0,
-                wrong           INTEGER DEFAULT 0,
-                learned         INTEGER DEFAULT 0,
-                marked_hard     INTEGER DEFAULT 0,
-                marked_know     INTEGER DEFAULT 0,
-                added_at        TEXT,
-                learned_at      TEXT,
-                next_review     TEXT,
-                ease_factor     REAL DEFAULT 2.5,
-                interval_days   INTEGER DEFAULT 0,
-                repetitions     INTEGER DEFAULT 0,
-                last_reviewed_at TEXT,
-                last_grade      TEXT,
-                UNIQUE(user_id, word),
-                FOREIGN KEY (user_id) REFERENCES users(user_id) ON DELETE CASCADE
-            )
-        """)
-
-        # sessions table
-        await db.execute("""
-            CREATE TABLE IF NOT EXISTS sessions (
-                id          SERIAL PRIMARY KEY,
-                user_id     BIGINT NOT NULL,
-                word        TEXT NOT NULL,
-                answered_at TEXT NOT NULL,
-                correct     INTEGER NOT NULL,
-                FOREIGN KEY (user_id) REFERENCES users(user_id) ON DELETE CASCADE
-            )
-        """)
-
-        # story_history table
-        await db.execute("""
-            CREATE TABLE IF NOT EXISTS story_history (
-                id          SERIAL PRIMARY KEY,
-                user_id     BIGINT NOT NULL,
-                story_date  TEXT NOT NULL,
-                genre       TEXT NOT NULL,
-                words_json  TEXT NOT NULL,
-                story_text  TEXT NOT NULL,
-                created_at  TEXT NOT NULL,
-                FOREIGN KEY (user_id) REFERENCES users(user_id) ON DELETE CASCADE
-            )
-        """)
-
-        # memory_palace_history table
-        await db.execute("""
-            CREATE TABLE IF NOT EXISTS memory_palace_history (
-                id          SERIAL PRIMARY KEY,
-                user_id     BIGINT NOT NULL,
-                palace_date TEXT NOT NULL,
-                theme       TEXT NOT NULL,
-                words_json  TEXT NOT NULL,
-                palace_text TEXT NOT NULL,
-                created_at  TEXT NOT NULL,
-                FOREIGN KEY (user_id) REFERENCES users(user_id) ON DELETE CASCADE
-            )
-        """)
-
-        # word_audio_cache table
-        await db.execute("""
-            CREATE TABLE IF NOT EXISTS word_audio_cache (
-                word        TEXT PRIMARY KEY,
-                file_id     TEXT NOT NULL,
-                created_at  TEXT NOT NULL
-            )
-        """)
-
-        # Indexes
-        await db.execute("CREATE INDEX IF NOT EXISTS idx_progress_user ON word_progress(user_id)")
-        await db.execute("CREATE INDEX IF NOT EXISTS idx_progress_review ON word_progress(user_id, next_review)")
-        await db.execute("CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id)")
-        await db.execute("CREATE INDEX IF NOT EXISTS idx_story_user_date ON story_history(user_id, story_date)")
-        await db.execute(
-            "CREATE INDEX IF NOT EXISTS idx_palace_user_date ON memory_palace_history(user_id, palace_date)"
-        )
 
 
 async def init_db():
-    """Initializes the database schema for PostgreSQL."""
-    await _init_postgres_schema()
+    """Initializes the database schema."""
+    await init_db_pool()
+    assert _async_engine is not None
+    if _is_sqlite_dsn(DATABASE_URL):
+        async with _async_engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+    else:
+        import alembic.command
+        import alembic.config
+        def run_upgrade():
+            alembic_cfg = alembic.config.Config("alembic.ini")
+            try:
+                alembic.command.upgrade(alembic_cfg, "head")
+            except Exception as e:
+                # If tables already exist (e.g. in existing Docker volume), stamp as head
+                if "already exists" in str(e).lower() or "duplicate" in str(e).lower():
+                    alembic.command.stamp(alembic_cfg, "head")
+                else:
+                    raise
+
+        await asyncio.to_thread(run_upgrade)
+
+    # Ensure language column exists on existing database schema
+    try:
+        async with _db_connect() as db:
+            await db.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS language TEXT DEFAULT 'hy';"))
+    except Exception:
+        pass
 
 
-# ═══════════════════════════════════════════════════════
-# USERS
-# ═══════════════════════════════════════════════════════
+async def clear_all_tables():
+    """Clear all tables (for test suites)."""
+    async with _db_connect() as db:
+        for model in [Session, WordProgress, StoryHistory, MemoryPalaceHistory, WordAudioCache, AuditLog, Setting, User]:
+            await db.execute(delete(model))
+        await db.commit()
+
+
+
+async def _insert_ignore(db: _AsyncSessionContext, model: Any, values: dict, index_elements: list[str] | None = None):
+    if _is_sqlite_dsn(DATABASE_URL):
+        stmt = sqlite_insert(model).values(**values).on_conflict_do_nothing(index_elements=index_elements)
+    else:
+        stmt = pg_insert(model).values(**values).on_conflict_do_nothing(index_elements=index_elements)
+    await db.execute(stmt)
+
 
 async def ensure_user(user_id: int, username: str = ""):
     now = datetime.now().isoformat()
     today = datetime.now().date().isoformat()
     safe_username = (username or "").strip()[:64]
     async with _db_connect() as db:
-        await db.execute("""
-            INSERT OR IGNORE INTO users (user_id, username, joined_at, daily_date)
-            VALUES (?, ?, ?, ?)
-        """, (user_id, safe_username, now, today))
+        await _insert_ignore(
+            db,
+            User,
+            {"user_id": user_id, "username": safe_username, "joined_at": now, "daily_date": today, "language": "hy"},
+            index_elements=["user_id"],
+        )
         if safe_username:
-            # Keep username fresh for existing users as well.
             await db.execute(
-                """
-                UPDATE users
-                SET username = ?
-                WHERE user_id = ? AND COALESCE(username, '') <> ?
-                """,
-                (safe_username, user_id, safe_username),
+                update(User)
+                .where(User.user_id == user_id, func.coalesce(User.username, "") != safe_username)
+                .values(username=safe_username)
             )
-        await db.commit()
+        res = await db.execute(select(User.language).where(User.user_id == user_id))
+        row = res.first()
+        if row and row[0]:
+            from src.core.app_state import user_language
+            user_language[user_id] = row[0]
     await update_streak(user_id)
+
+
+async def set_user_language_db(user_id: int, lang: str):
+    if lang not in {"hy", "ru", "en"}:
+        return
+    async with _db_connect() as db:
+        await db.execute(update(User).where(User.user_id == user_id).values(language=lang))
+
+
+async def get_user_language_db(user_id: int) -> str:
+    async with _db_connect() as db:
+        res = await db.execute(select(User.language).where(User.user_id == user_id))
+        row = res.first()
+        return row[0] if row and row[0] else "hy"
 
 
 async def update_streak(user_id: int):
     async with _db_connect() as db:
-        db.row_factory = asyncpg.Record
-        async with db.execute(
-            "SELECT streak, last_active FROM users WHERE user_id = ?",
-            (user_id,)
-        ) as cur:
-            row = await cur.fetchone()
-
+        res = await db.execute(select(User.streak, User.last_active).where(User.user_id == user_id))
+        row = res.first()
         if not row:
             return
 
+        streak, last_active_str = row[0], row[1]
         now = datetime.now()
         today = now.date()
-        
-        last_active_str = row["last_active"]
+
         if not last_active_str:
-            # First time activity
             await db.execute(
-                "UPDATE users SET streak = 1, last_active = ? WHERE user_id = ?",
-                (now.isoformat(), user_id),
+                update(User).where(User.user_id == user_id).values(streak=1, last_active=now.isoformat())
             )
-            await db.commit()
             return
 
         last = datetime.fromisoformat(last_active_str).date()
-
         if last == today:
-            # Already active today, just refresh the timestamp
             await db.execute(
-                "UPDATE users SET last_active = ? WHERE user_id = ?",
-                (now.isoformat(), user_id),
+                update(User).where(User.user_id == user_id).values(last_active=now.isoformat())
             )
-            await db.commit()
             return
 
-        # If last activity was yesterday
         if (today - last).days == 1:
-            new_streak = row["streak"] + 1
+            new_streak = streak + 1
         elif (today - last).days > 1:
-            # Streak broken
             new_streak = 1
         else:
-            # This handles cases where 'today' might be somehow before 'last' (rare clock issues)
-            new_streak = row["streak"]
+            new_streak = streak
 
-        await db.execute("""
-            UPDATE users SET streak = ?, last_active = ? WHERE user_id = ?
-        """, (new_streak, now.isoformat(), user_id))
-        await db.commit()
+        await db.execute(
+            update(User).where(User.user_id == user_id).values(streak=new_streak, last_active=now.isoformat())
+        )
 
 
 async def set_user_plan(user_id: int, plan: str):
     if plan not in {"steady", "deep"}:
         return
     async with _db_connect() as db:
-        await db.execute("UPDATE users SET study_plan = ? WHERE user_id = ?", (plan, user_id))
-        await db.commit()
+        await db.execute(update(User).where(User.user_id == user_id).values(study_plan=plan))
 
 
 async def get_user_plan(user_id: int) -> str:
     async with _db_connect() as db:
-        db.row_factory = asyncpg.Record
-        async with db.execute("SELECT study_plan FROM users WHERE user_id = ?", (user_id,)) as cur:
-            row = await cur.fetchone()
-    return row["study_plan"] if row and row["study_plan"] else "steady"
+        res = await db.execute(select(User.study_plan).where(User.user_id == user_id))
+        row = res.first()
+    return row[0] if row and row[0] else "steady"
 
 
 # ═══════════════════════════════════════════════════════
@@ -385,104 +468,74 @@ async def get_user_plan(user_id: int) -> str:
 async def get_daily_count(user_id: int) -> int:
     today = datetime.now().date().isoformat()
     async with _db_connect() as db:
-        db.row_factory = asyncpg.Record
-        async with db.execute(
-            "SELECT daily_count, daily_date FROM users WHERE user_id = ?",
-            (user_id,)
-        ) as cur:
-            row = await cur.fetchone()
-
+        res = await db.execute(select(User.daily_count, User.daily_date).where(User.user_id == user_id))
+        row = res.first()
         if not row:
             return 0
-
-        if row["daily_date"] != today:
-            await db.execute("""
-                UPDATE users SET daily_count = 0, daily_date = ? WHERE user_id = ?
-            """, (today, user_id))
-            await db.commit()
+        daily_count, daily_date = row[0], row[1]
+        if daily_date != today:
+            await db.execute(update(User).where(User.user_id == user_id).values(daily_count=0, daily_date=today))
             return 0
-
-        return row["daily_count"] or 0
+        return daily_count or 0
 
 
 async def increment_daily(user_id: int, word: str | None = None):
     today = datetime.now().date().isoformat()
     async with _db_connect() as db:
-        # Count only unique words per day (same word answered multiple times today counts once)
         should_increment = True
         if word:
-            async with db.execute(
-                """
-                SELECT COUNT(*) as c
-                FROM sessions
-                WHERE user_id = ? AND word = ? AND substr(answered_at, 1, 10) = ?
-                """,
-                (user_id, word, today),
-            ) as cur:
-                row = await cur.fetchone()
-                should_increment = (row[0] if row else 0) <= 1
+            res = await db.execute(
+                select(func.count(Session.id)).where(
+                    Session.user_id == user_id,
+                    Session.word == word,
+                    func.substr(Session.answered_at, 1, 10) == today,
+                )
+            )
+            cnt = res.scalar() or 0
+            should_increment = cnt <= 1
 
         if should_increment:
-            # If day changed, reset to 0 first, then increment
             await db.execute(
-                """
-                UPDATE users
-                SET daily_count = CASE WHEN daily_date = ? THEN daily_count + 1 ELSE 1 END,
-                    daily_date = ?
-                WHERE user_id = ?
-                """,
-                (today, today, user_id),
+                update(User)
+                .where(User.user_id == user_id)
+                .values(
+                    daily_count=case((User.daily_date == today, User.daily_count + 1), else_=1),
+                    daily_date=today,
+                )
             )
         else:
-            # Keep day synced even when count is not incremented
             await db.execute(
-                """
-                UPDATE users
-                SET daily_date = CASE WHEN daily_date IS NULL THEN ? ELSE daily_date END
-                WHERE user_id = ?
-                """,
-                (today, user_id),
+                update(User)
+                .where(User.user_id == user_id, User.daily_date.is_(None))
+                .values(daily_date=today)
             )
-        await db.commit()
 
 
 # ═══════════════════════════════════════════════════════
 # USER LEVEL
-# ══════════════════════════���════════════════════════════
+# ═══════════════════════════════════════════════════════
 
 async def set_user_level(user_id: int, level: str):
     level = (level or "").upper()
     if level not in {"A1", "A2", "B1", "B2"}:
         return
     async with _db_connect() as db:
-        await db.execute(
-            "UPDATE users SET user_level = ? WHERE user_id = ?",
-            (level, user_id),
-        )
-        await db.commit()
+        await db.execute(update(User).where(User.user_id == user_id).values(user_level=level))
 
 
 async def get_user_level(user_id: int) -> str:
     async with _db_connect() as db:
-        db.row_factory = asyncpg.Record
-        async with db.execute(
-            "SELECT user_level FROM users WHERE user_id = ?",
-            (user_id,),
-        ) as cur:
-            row = await cur.fetchone()
-    lvl = (row["user_level"] if row else None) if row else None
+        res = await db.execute(select(User.user_level).where(User.user_id == user_id))
+        row = res.first()
+    lvl = row[0] if row else None
     return lvl or "A1"
 
 
 async def is_placement_done(user_id: int) -> bool:
     async with _db_connect() as db:
-        db.row_factory = asyncpg.Record
-        async with db.execute(
-            "SELECT COALESCE(placement_done, 0) AS placement_done FROM users WHERE user_id = ?",
-            (user_id,),
-        ) as cur:
-            row = await cur.fetchone()
-    return bool(row and int(row["placement_done"] or 0) == 1)
+        res = await db.execute(select(func.coalesce(User.placement_done, 0)).where(User.user_id == user_id))
+        row = res.first()
+    return bool(row and int(row[0] or 0) == 1)
 
 
 async def set_placement_result(user_id: int, level: str, score: int) -> bool:
@@ -491,19 +544,13 @@ async def set_placement_result(user_id: int, level: str, score: int) -> bool:
         level = "A1"
     now = datetime.now().isoformat()
     async with _db_connect() as db:
-        cur = await db.execute(
-            """
-            UPDATE users
-            SET placement_done = 1,
-                placement_score = ?,
-                placement_taken_at = ?,
-                user_level = ?
-            WHERE user_id = ?
-            """,
-            (int(score or 0), now, level, user_id),
+        res = await db.execute(
+            update(User)
+            .where(User.user_id == user_id)
+            .values(placement_done=1, placement_score=int(score or 0), placement_taken_at=now, user_level=level)
         )
-        await db.commit()
-    return (cur.rowcount or 0) > 0
+    return (res.rowcount or 0) > 0
+
 
 
 # ═══════════════════════════════════════════════════════
@@ -575,7 +622,6 @@ async def get_next_word(
 ) -> str:
     import random
     async with _db_connect() as db:
-        db.row_factory = asyncpg.Record
         today = datetime.now().isoformat()
         allowed = list(all_words)
         excluded_set = set()
@@ -586,64 +632,59 @@ async def get_next_word(
         filtered_allowed = [w for w in allowed if w not in excluded_set] or allowed
         if not allowed:
             return all_words[0] if all_words else ""
-        placeholders = ",".join("?" * len(filtered_allowed))
 
         # 1. Marked hard + due (NULL next_review considered due)
         if include_hard_due:
-            async with db.execute(
-                f"""
-                SELECT word FROM word_progress
-                WHERE user_id = ? AND marked_hard = 1
-                  AND (next_review IS NULL OR next_review <= ?)
-                  AND word IN ({placeholders})
-                ORDER BY next_review ASC LIMIT 1
-                """,
-                (user_id, today, *filtered_allowed),
-            ) as cur:
-                row = await cur.fetchone()
-                if row:
-                    return row["word"]
+            res = await db.execute(
+                select(WordProgress.word)
+                .where(
+                    WordProgress.user_id == user_id,
+                    WordProgress.marked_hard == 1,
+                    (WordProgress.next_review.is_(None)) | (WordProgress.next_review <= today),
+                    WordProgress.word.in_(filtered_allowed),
+                )
+                .order_by(asc(WordProgress.next_review))
+                .limit(1)
+            )
+            word = res.scalar()
+            if word:
+                return word
 
         # 2. Due words (explicitly require non-NULL next_review)
-        async with db.execute(
-            f"""
-            SELECT word FROM word_progress
-            WHERE user_id = ? AND marked_hard = 0
-              AND next_review IS NOT NULL AND next_review <= ?
-              AND word IN ({placeholders})
-            ORDER BY next_review ASC LIMIT 1
-            """,
-            (user_id, today, *filtered_allowed),
-        ) as cur:
-            row = await cur.fetchone()
-            if row:
-                return row["word"]
+        res = await db.execute(
+            select(WordProgress.word)
+            .where(
+                WordProgress.user_id == user_id,
+                WordProgress.marked_hard == 0,
+                WordProgress.next_review.is_not(None),
+                WordProgress.next_review <= today,
+                WordProgress.word.in_(filtered_allowed),
+            )
+            .order_by(asc(WordProgress.next_review))
+            .limit(1)
+        )
+        word = res.scalar()
+        if word:
+            return word
 
         # 3. New words
-        async with db.execute(
-            "SELECT word FROM word_progress WHERE user_id = ?",
-            (user_id,),
-        ) as cur:
-            seen = {r["word"] async for r in cur}
-
+        res = await db.execute(select(WordProgress.word).where(WordProgress.user_id == user_id))
+        seen = {row[0] for row in res}
         new_words = [w for w in filtered_allowed if w not in seen]
         if new_words:
             return random.choice(new_words)
 
         # 4. Oldest next_review (treat NULLs as last)
-        async with db.execute(
-            f"""
-            SELECT word FROM word_progress
-            WHERE user_id = ? AND word IN ({placeholders})
-            ORDER BY (next_review IS NULL) ASC, next_review ASC
-            LIMIT 1
-            """,
-            (user_id, *filtered_allowed),
-        ) as cur:
-            row = await cur.fetchone()
-            if row:
-                return row["word"]
-            return filtered_allowed[0] if filtered_allowed else all_words[0]
+        res = await db.execute(
+            select(WordProgress.word)
+            .where(WordProgress.user_id == user_id, WordProgress.word.in_(filtered_allowed))
+            .order_by(asc(WordProgress.next_review.is_(None)), asc(WordProgress.next_review))
+            .limit(1)
+        )
+        word = res.scalar()
+        if word:
+            return word
+        return filtered_allowed[0] if filtered_allowed else all_words[0]
 
 
 async def get_word_reason(user_id: int, word: str) -> str:
@@ -653,28 +694,27 @@ async def get_word_reason(user_id: int, word: str) -> str:
 
     now = datetime.now().isoformat()
     async with _db_connect() as db:
-        db.row_factory = asyncpg.Record
-        async with db.execute(
-            """
-            SELECT seen, marked_hard, next_review, correct, wrong
-            FROM word_progress
-            WHERE user_id = ? AND word = ?
-            """,
-            (user_id, word),
-        ) as cur:
-            row = await cur.fetchone()
+        res = await db.execute(
+            select(
+                WordProgress.seen,
+                WordProgress.marked_hard,
+                WordProgress.next_review,
+                WordProgress.correct,
+                WordProgress.wrong,
+            ).where(WordProgress.user_id == user_id, WordProgress.word == word)
+        )
+        row = res.first()
 
     if not row:
         return "Նոր բառ է ձեր ծրագրում։"
-    if (row["marked_hard"] or 0) == 1:
+    seen, marked_hard, next_review, correct, wrong = row[0], row[1], row[2], row[3], row[4]
+    if (marked_hard or 0) == 1:
         return "Նշված էր «Կրկնել», դրա համար կրկին ցույց է տրվում։"
-    if row["next_review"] and row["next_review"] <= now:
+    if next_review and next_review <= now:
         return "Կրկնության ժամկետը եկել է։"
-    if (row["seen"] or 0) <= 1:
+    if (seen or 0) <= 1:
         return "Նոր կամ քիչ տեսած բառ է՝ ամրապնդման համար։"
-    wrong = row["wrong"] or 0
-    correct = row["correct"] or 0
-    if wrong > correct:
+    if (wrong or 0) > (correct or 0):
         return "Այս բառով ավելի հաճախ եք սխալվել, դրա համար առաջնահերթ է։"
     return "Պլանային հերթական բառ է ձեր մակարդակից։"
 
@@ -688,104 +728,90 @@ async def record_answer(
 ):
     now = datetime.now().isoformat()
     async with _db_connect() as db:
-        db.row_factory = asyncpg.Record
-
-        await db.execute(
-            """
-            INSERT OR IGNORE INTO word_progress (user_id, word, added_at)
-            VALUES (?, ?, ?)
-            """,
-            (user_id, word, now),
+        await _insert_ignore(
+            db,
+            WordProgress,
+            {"user_id": user_id, "word": word, "added_at": now},
+            index_elements=["user_id", "word"],
         )
 
-        async with db.execute(
-            """
-            SELECT level, correct, correct_streak, wrong, marked_hard, marked_know,
-                   ease_factor, interval_days, repetitions
-            FROM word_progress WHERE user_id = ? AND word = ?
-            """,
-            (user_id, word),
-        ) as cur:
-            entry = await cur.fetchone()
+        res = await db.execute(
+            select(
+                WordProgress.level,
+                WordProgress.correct,
+                WordProgress.correct_streak,
+                WordProgress.wrong,
+                WordProgress.marked_hard,
+                WordProgress.marked_know,
+                WordProgress.ease_factor,
+                WordProgress.interval_days,
+                WordProgress.repetitions,
+            ).where(WordProgress.user_id == user_id, WordProgress.word == word)
+        )
+        entry = res.first()
+        if not entry:
+            return
 
-        level = entry["level"]
-        new_correct = entry["correct"] + (1 if correct else 0)
-        new_wrong = entry["wrong"] + (0 if correct else 1)
-        new_correct_streak = entry["correct_streak"] + 1 if correct else 0
+        level = entry[0]
+        new_correct = entry[1] + (1 if correct else 0)
+        new_wrong = entry[3] + (0 if correct else 1)
+        new_correct_streak = entry[2] + 1 if correct else 0
 
         if correct:
             level = min(level + 1, 3)
         else:
-            # allow level to drop to 0
             level = max(level - 1, 0)
 
         grade_norm = (grade or "").strip().lower()
         if not grade_norm:
             grade_norm = "hard" if (correct and marked_hard) else ("again" if not correct else "good")
 
-        # marked_know — set on good/easy outcomes
-        new_marked_know = 1 if grade_norm in {"good", "easy"} else entry["marked_know"]
-        # marked_hard — persist for again/hard outcomes, clear for good/easy
+        new_marked_know = 1 if grade_norm in {"good", "easy"} else entry[5]
         if grade_norm in {"again", "hard"}:
             new_marked_hard = 1
         elif grade_norm in {"good", "easy"}:
             new_marked_hard = 0
         else:
-            new_marked_hard = 0 if correct else (1 if marked_hard else entry["marked_hard"])
+            new_marked_hard = 0 if correct else (1 if marked_hard else entry[4])
 
-        # learned_at — set on good/easy
         learned_at = now if grade_norm in {"good", "easy"} else None
 
         ef, srs_interval_days, srs_repetitions = _srs_schedule(
             correct=correct,
             marked_hard=marked_hard,
             grade=grade_norm,
-            ease_factor=float(entry["ease_factor"] if entry["ease_factor"] is not None else 2.5),
-            interval_days=int(entry["interval_days"] or 0),
-            repetitions=int(entry["repetitions"] or 0),
+            ease_factor=float(entry[6] if entry[6] is not None else 2.5),
+            interval_days=int(entry[7] or 0),
+            repetitions=int(entry[8] or 0),
         )
         days = max(INTERVALS[level], srs_interval_days)
         next_review = (datetime.now() + timedelta(days=days)).isoformat()
 
         await db.execute(
-            """
-            UPDATE word_progress
-            SET level=?, seen=seen+1, correct=?, correct_streak=?,
-                wrong=?, marked_hard=?, marked_know=?,
-                learned_at=COALESCE(?, learned_at),
-                next_review=?,
-                ease_factor=?, interval_days=?, repetitions=?, last_reviewed_at=?,
-                last_grade=?
-            WHERE user_id=? AND word=?
-            """,
-            (
-                level,
-                new_correct,
-                new_correct_streak,
-                new_wrong,
-                new_marked_hard,
-                new_marked_know,
-                learned_at,
-                next_review,
-                ef,
-                days,
-                srs_repetitions,
-                now,
-                grade_norm,
-                user_id,
-                word,
-            ),
+            update(WordProgress)
+            .where(WordProgress.user_id == user_id, WordProgress.word == word)
+            .values(
+                level=level,
+                seen=WordProgress.seen + 1,
+                correct=new_correct,
+                correct_streak=new_correct_streak,
+                wrong=new_wrong,
+                marked_hard=new_marked_hard,
+                marked_know=new_marked_know,
+                learned_at=func.coalesce(learned_at, WordProgress.learned_at),
+                next_review=next_review,
+                ease_factor=ef,
+                interval_days=days,
+                repetitions=srs_repetitions,
+                last_reviewed_at=now,
+                last_grade=grade_norm,
+            )
         )
 
         await db.execute(
-            """
-            INSERT INTO sessions (user_id, word, answered_at, correct)
-            VALUES (?, ?, ?, ?)
-            """,
-            (user_id, word, now, 1 if correct else 0),
+            insert(Session).values(user_id=user_id, word=word, answered_at=now, correct=1 if correct else 0)
         )
 
-        await db.commit()
 
 
 # ═══════════════════════════════════════════════════════
@@ -794,98 +820,90 @@ async def record_answer(
 
 async def get_stats(user_id: int, total_words: int) -> dict:
     async with _db_connect() as db:
-        db.row_factory = asyncpg.Record
         today = datetime.now().isoformat()
 
-        async with db.execute("""
-            SELECT
-                COUNT(*) as seen,
-                SUM(marked_know) as learned,
-                SUM(marked_hard) as hard,
-                SUM(correct) as total_correct,
-                SUM(wrong) as total_wrong,
-                SUM(CASE WHEN marked_hard=1 AND next_review <= ? THEN 1 ELSE 0 END) as due_today
-            FROM word_progress WHERE user_id = ?
-        """, (today, user_id)) as cur:
-            s = await cur.fetchone()
+        res = await db.execute(
+            text("""
+                SELECT
+                    COUNT(*) as seen,
+                    COALESCE(SUM(marked_know), 0) as learned,
+                    COALESCE(SUM(marked_hard), 0) as hard,
+                    COALESCE(SUM(correct), 0) as total_correct,
+                    COALESCE(SUM(wrong), 0) as total_wrong,
+                    COALESCE(SUM(CASE WHEN marked_hard=1 AND next_review <= :today THEN 1 ELSE 0 END), 0) as due_today
+                FROM word_progress WHERE user_id = :user_id
+            """),
+            {"today": today, "user_id": user_id},
+        )
+        s = res.mappings().first()
 
-        async with db.execute(
-            "SELECT streak FROM users WHERE user_id = ?", (user_id,)
-        ) as cur:
-            u = await cur.fetchone()
+        res_u = await db.execute(select(User.streak).where(User.user_id == user_id))
+        streak = res_u.scalar() or 0
 
-        seen = s["seen"] or 0
-        learned = s["learned"] or 0
-        total_correct = s["total_correct"] or 0
-        total_wrong = s["total_wrong"] or 0
-        total_answers = total_correct + total_wrong
+    seen = int(s["seen"] or 0) if s else 0
+    learned = int(s["learned"] or 0) if s else 0
+    total_correct = int(s["total_correct"] or 0) if s else 0
+    total_wrong = int(s["total_wrong"] or 0) if s else 0
+    total_answers = total_correct + total_wrong
 
-        return {
-            "total": total_words,
-            "seen": seen,
-            "unseen": total_words - seen,
-            "learned": learned,
-            "hard": s["hard"] or 0,
-            "due_today": s["due_today"] or 0,
-            "accuracy": round(total_correct / total_answers * 100) if total_answers else 0,
-            "progress_pct": round(learned / total_words * 100, 1),
-            "streak": u["streak"] if u else 0,
-        }
+    return {
+        "total": total_words,
+        "seen": seen,
+        "unseen": total_words - seen,
+        "learned": learned,
+        "hard": int(s["hard"] or 0) if s else 0,
+        "due_today": int(s["due_today"] or 0) if s else 0,
+        "accuracy": round(total_correct / total_answers * 100) if total_answers else 0,
+        "progress_pct": round(learned / total_words * 100, 1),
+        "streak": streak,
+    }
 
 
 async def get_hard_words(user_id: int) -> list[dict]:
-    """🔁 Կրկնել սեղմած բառերը"""
+    """Կրկնել սեղմած բառերը (Words marked as hard)."""
     async with _db_connect() as db:
-        db.row_factory = asyncpg.Record
-        async with db.execute("""
-            SELECT word, wrong, correct, added_at, last_grade
-            FROM word_progress
-            WHERE user_id = ? AND marked_hard = 1
-            ORDER BY added_at DESC
-        """, (user_id,)) as cur:
-            rows = await cur.fetchall()
-        return [dict(r) for r in rows]
+        res = await db.execute(
+            select(
+                WordProgress.word,
+                WordProgress.wrong,
+                WordProgress.correct,
+                WordProgress.added_at,
+                WordProgress.last_grade,
+            )
+            .where(WordProgress.user_id == user_id, WordProgress.marked_hard == 1)
+            .order_by(desc(WordProgress.added_at))
+        )
+        return [dict(r) for r in res.mappings().all()]
 
 
 async def get_seen_words(user_id: int, limit: int = 300) -> list[str]:
     """Return words that user has already seen at least once."""
     async with _db_connect() as db:
-        db.row_factory = asyncpg.Record
-        async with db.execute(
-            """
-            SELECT word
-            FROM word_progress
-            WHERE user_id = ? AND seen > 0
-            ORDER BY added_at DESC
-            LIMIT ?
-            """,
-            (user_id, limit),
-        ) as cur:
-            rows = await cur.fetchall()
-    return [r["word"] for r in rows]
+        res = await db.execute(
+            select(WordProgress.word)
+            .where(WordProgress.user_id == user_id, WordProgress.seen > 0)
+            .order_by(desc(WordProgress.added_at))
+            .limit(limit)
+        )
+        return [r[0] for r in res.all()]
 
 
 async def get_today_answered_words(user_id: int, limit: int = 10) -> list[str]:
     today = datetime.now().date().isoformat()
     safe_limit = max(1, min(int(limit or 10), 30))
     async with _db_connect() as db:
-        db.row_factory = asyncpg.Record
-        async with db.execute(
-            """
-            SELECT word
-            FROM sessions
-            WHERE user_id = ? AND substr(answered_at, 1, 10) = ?
-            ORDER BY id DESC
-            LIMIT 200
-            """,
-            (user_id, today),
-        ) as cur:
-            rows = await cur.fetchall()
+        res = await db.execute(
+            select(Session.word)
+            .where(Session.user_id == user_id, func.substr(Session.answered_at, 1, 10) == today)
+            .order_by(desc(Session.id))
+            .limit(200)
+        )
+        rows = res.all()
 
     out: list[str] = []
     seen: set[str] = set()
     for r in rows:
-        w = (r["word"] or "").strip().lower()
+        w = (r[0] or "").strip().lower()
         if not w or w in seen:
             continue
         seen.add(w)
@@ -900,47 +918,44 @@ async def save_story_history(user_id: int, genre: str, words: list[str], story_t
     story_date = now[:10]
     words_json = json.dumps(list(dict.fromkeys(words or [])), ensure_ascii=False)
     async with _db_connect() as db:
-        sql = """
-            INSERT INTO story_history (user_id, story_date, genre, words_json, story_text, created_at)
-            VALUES (?, ?, ?, ?, ?, ?)
-        """
-        sql += " RETURNING id"
-        cur = await db.execute(
-            sql,
-            (user_id, story_date, (genre or "general")[:40], words_json, story_text, now),
+        res = await db.execute(
+            insert(StoryHistory).values(
+                user_id=user_id,
+                story_date=story_date,
+                genre=(genre or "general")[:40],
+                words_json=words_json,
+                story_text=story_text,
+                created_at=now,
+            )
         )
-        await db.commit()
-        row = await cur.fetchone()
-        return int((row["id"] if row and "id" in row else 0) or 0)
+        return int(res.inserted_primary_key[0] if res.inserted_primary_key else 0)
 
 
 async def count_story_generations_today(user_id: int) -> int:
     today = datetime.now().date().isoformat()
     async with _db_connect() as db:
-        db.row_factory = asyncpg.Record
-        async with db.execute(
-            "SELECT COUNT(*) AS c FROM story_history WHERE user_id = ? AND story_date = ?",
-            (user_id, today),
-        ) as cur:
-            row = await cur.fetchone()
-    return int(row["c"] if row else 0)
+        res = await db.execute(
+            select(func.count()).where(StoryHistory.user_id == user_id, StoryHistory.story_date == today)
+        )
+        return int(res.scalar() or 0)
 
 
 async def get_story_history(user_id: int, limit: int = 5) -> list[dict]:
     safe_limit = max(1, min(int(limit or 5), 20))
     async with _db_connect() as db:
-        db.row_factory = asyncpg.Record
-        async with db.execute(
-            """
-            SELECT story_date, genre, words_json, story_text, created_at
-            FROM story_history
-            WHERE user_id = ?
-            ORDER BY id DESC
-            LIMIT ?
-            """,
-            (user_id, safe_limit),
-        ) as cur:
-            rows = await cur.fetchall()
+        res = await db.execute(
+            select(
+                StoryHistory.story_date,
+                StoryHistory.genre,
+                StoryHistory.words_json,
+                StoryHistory.story_text,
+                StoryHistory.created_at,
+            )
+            .where(StoryHistory.user_id == user_id)
+            .order_by(desc(StoryHistory.id))
+            .limit(safe_limit)
+        )
+        rows = res.mappings().all()
     out: list[dict] = []
     for r in rows:
         d = dict(r)
@@ -957,48 +972,44 @@ async def save_memory_palace_history(user_id: int, theme: str, words: list[str],
     palace_date = now[:10]
     words_json = json.dumps(list(dict.fromkeys(words or [])), ensure_ascii=False)
     async with _db_connect() as db:
-        sql = """
-            INSERT INTO memory_palace_history
-                (user_id, palace_date, theme, words_json, palace_text, created_at)
-            VALUES (?, ?, ?, ?, ?, ?)
-        """
-        sql += " RETURNING id"
-        cur = await db.execute(
-            sql,
-            (user_id, palace_date, (theme or "general")[:40], words_json, palace_text, now),
+        res = await db.execute(
+            insert(MemoryPalaceHistory).values(
+                user_id=user_id,
+                palace_date=palace_date,
+                theme=(theme or "general")[:40],
+                words_json=words_json,
+                palace_text=palace_text,
+                created_at=now,
+            )
         )
-        await db.commit()
-        row = await cur.fetchone()
-        return int((row["id"] if row and "id" in row else 0) or 0)
+        return int(res.inserted_primary_key[0] if res.inserted_primary_key else 0)
 
 
 async def count_palace_generations_today(user_id: int) -> int:
     today = datetime.now().date().isoformat()
     async with _db_connect() as db:
-        db.row_factory = asyncpg.Record
-        async with db.execute(
-            "SELECT COUNT(*) AS c FROM memory_palace_history WHERE user_id = ? AND palace_date = ?",
-            (user_id, today),
-        ) as cur:
-            row = await cur.fetchone()
-    return int(row["c"] if row else 0)
+        res = await db.execute(
+            select(func.count()).where(MemoryPalaceHistory.user_id == user_id, MemoryPalaceHistory.palace_date == today)
+        )
+        return int(res.scalar() or 0)
 
 
 async def get_memory_palace_history(user_id: int, limit: int = 5) -> list[dict]:
     safe_limit = max(1, min(int(limit or 5), 20))
     async with _db_connect() as db:
-        db.row_factory = asyncpg.Record
-        async with db.execute(
-            """
-            SELECT palace_date, theme, words_json, palace_text, created_at
-            FROM memory_palace_history
-            WHERE user_id = ?
-            ORDER BY id DESC
-            LIMIT ?
-            """,
-            (user_id, safe_limit),
-        ) as cur:
-            rows = await cur.fetchall()
+        res = await db.execute(
+            select(
+                MemoryPalaceHistory.palace_date,
+                MemoryPalaceHistory.theme,
+                MemoryPalaceHistory.words_json,
+                MemoryPalaceHistory.palace_text,
+                MemoryPalaceHistory.created_at,
+            )
+            .where(MemoryPalaceHistory.user_id == user_id)
+            .order_by(desc(MemoryPalaceHistory.id))
+            .limit(safe_limit)
+        )
+        rows = res.mappings().all()
     out: list[dict] = []
     for r in rows:
         d = dict(r)
@@ -1014,45 +1025,32 @@ async def mark_word_learned(user_id: int, word: str) -> bool:
     """Move a word from review list to learned list."""
     now = datetime.now().isoformat()
     async with _db_connect() as db:
-        await db.execute(
-            """
-            INSERT OR IGNORE INTO word_progress (user_id, word, added_at)
-            VALUES (?, ?, ?)
-            """,
-            (user_id, word, now),
-        )
-        cur = await db.execute(
-            """
-            UPDATE word_progress
-            SET marked_hard = 0,
-                marked_know = 1,
-                learned = 1,
-                learned_at = COALESCE(learned_at, ?),
-                last_grade = 'good'
-            WHERE user_id = ? AND word = ?
-            """,
-            (now, user_id, word),
+        await _insert_ignore(db, WordProgress, {"user_id": user_id, "word": word, "added_at": now})
+        res = await db.execute(
+            update(WordProgress)
+            .where(WordProgress.user_id == user_id, WordProgress.word == word)
+            .values(
+                marked_hard=0,
+                marked_know=1,
+                learned=1,
+                learned_at=func.coalesce(WordProgress.learned_at, now),
+                last_grade="good",
+            )
         )
         await db.commit()
-        return (cur.rowcount or 0) > 0
+        return (res.rowcount or 0) > 0
 
 
 async def get_top_weak_words(user_id: int, limit: int = 3) -> list[dict]:
     """Words with the highest error pressure."""
     async with _db_connect() as db:
-        db.row_factory = asyncpg.Record
-        async with db.execute(
-            """
-            SELECT word, wrong, correct
-            FROM word_progress
-            WHERE user_id = ? AND wrong > 0
-            ORDER BY (wrong - correct) DESC, wrong DESC
-            LIMIT ?
-            """,
-            (user_id, limit),
-        ) as cur:
-            rows = await cur.fetchall()
-        return [dict(r) for r in rows]
+        res = await db.execute(
+            select(WordProgress.word, WordProgress.wrong, WordProgress.correct)
+            .where(WordProgress.user_id == user_id, WordProgress.wrong > 0)
+            .order_by(desc(WordProgress.wrong - WordProgress.correct), desc(WordProgress.wrong))
+            .limit(limit)
+        )
+        return [dict(r) for r in res.mappings().all()]
 
 
 async def get_wordset_progress(user_id: int, words: list[str]) -> dict:
@@ -1061,33 +1059,23 @@ async def get_wordset_progress(user_id: int, words: list[str]) -> dict:
     uniq = list(dict.fromkeys(w.strip() for w in words if (w or "").strip()))
     if not uniq:
         return {"total": 0, "learned": 0, "accuracy": 0}
-    placeholders = ",".join("?" * len(uniq))
     async with _db_connect() as db:
-        db.row_factory = asyncpg.Record
-        async with db.execute(
-            f"""
-            SELECT COALESCE(SUM(marked_know), 0) AS learned
-            FROM word_progress
-            WHERE user_id = ? AND word IN ({placeholders})
-            """,
-            (user_id, *uniq),
-        ) as cur:
-            row = await cur.fetchone()
-            learned = int(row["learned"] or 0) if row else 0
+        res1 = await db.execute(
+            select(func.coalesce(func.sum(WordProgress.marked_know), 0).label("learned"))
+            .where(WordProgress.user_id == user_id, WordProgress.word.in_(uniq))
+        )
+        learned = int(res1.scalar() or 0)
 
-        async with db.execute(
-            f"""
-            SELECT
-                COALESCE(SUM(correct), 0) AS total_correct,
-                COALESCE(SUM(wrong), 0) AS total_wrong
-            FROM word_progress
-            WHERE user_id = ? AND word IN ({placeholders})
-            """,
-            (user_id, *uniq),
-        ) as cur:
-            row2 = await cur.fetchone()
-            total_correct = int(row2["total_correct"] or 0) if row2 else 0
-            total_wrong = int(row2["total_wrong"] or 0) if row2 else 0
+        res2 = await db.execute(
+            select(
+                func.coalesce(func.sum(WordProgress.correct), 0).label("total_correct"),
+                func.coalesce(func.sum(WordProgress.wrong), 0).label("total_wrong"),
+            )
+            .where(WordProgress.user_id == user_id, WordProgress.word.in_(uniq))
+        )
+        row2 = res2.mappings().first()
+        total_correct = int(row2["total_correct"] or 0) if row2 else 0
+        total_wrong = int(row2["total_wrong"] or 0) if row2 else 0
 
     total_answers = total_correct + total_wrong
     return {
@@ -1100,79 +1088,67 @@ async def get_wordset_progress(user_id: int, words: list[str]) -> dict:
 async def get_recent_accuracy(user_id: int, limit: int = 20) -> int:
     """Accuracy percentage for the latest N answered words."""
     async with _db_connect() as db:
-        db.row_factory = asyncpg.Record
-        async with db.execute(
-            """
-            SELECT correct
-            FROM sessions
-            WHERE user_id = ?
-            ORDER BY id DESC
-            LIMIT ?
-            """,
-            (user_id, limit),
-        ) as cur:
-            rows = await cur.fetchall()
+        res = await db.execute(
+            select(Session.correct)
+            .where(Session.user_id == user_id)
+            .order_by(desc(Session.id))
+            .limit(limit)
+        )
+        rows = res.all()
 
     if not rows:
         return 0
     total = len(rows)
-    ok = sum(int(r["correct"] or 0) for r in rows)
+    ok = sum(int(r[0] or 0) for r in rows)
     return round(ok * 100 / total)
 
 
 async def get_recent_accuracy_window(user_id: int, limit: int = 20, offset: int = 0) -> int | None:
     """Accuracy for a window of latest answers (supports OFFSET). Returns None if window is empty."""
     async with _db_connect() as db:
-        db.row_factory = asyncpg.Record
-        async with db.execute(
-            """
-            SELECT correct
-            FROM sessions
-            WHERE user_id = ?
-            ORDER BY id DESC
-            LIMIT ? OFFSET ?
-            """,
-            (user_id, limit, offset),
-        ) as cur:
-            rows = await cur.fetchall()
+        res = await db.execute(
+            select(Session.correct)
+            .where(Session.user_id == user_id)
+            .order_by(desc(Session.id))
+            .limit(limit)
+            .offset(offset)
+        )
+        rows = res.all()
 
     if not rows:
         return None
     total = len(rows)
-    ok = sum(int(r["correct"] or 0) for r in rows)
+    ok = sum(int(r[0] or 0) for r in rows)
     return round(ok * 100 / total)
 
 
 async def get_learned_words(user_id: int) -> list[dict]:
-    """✅ Գիտեմ սեղմած բառերը"""
+    """Գիտեմ սեղմած բառերը (Words marked as learned)."""
     async with _db_connect() as db:
-        db.row_factory = asyncpg.Record
-        async with db.execute("""
-            SELECT word, correct, learned_at, last_grade
-            FROM word_progress
-            WHERE user_id = ? AND marked_know = 1
-            ORDER BY learned_at DESC
-        """, (user_id,)) as cur:
-            rows = await cur.fetchall()
-        return [dict(r) for r in rows]
+        res = await db.execute(
+            select(WordProgress.word, WordProgress.correct, WordProgress.learned_at, WordProgress.last_grade)
+            .where(WordProgress.user_id == user_id, WordProgress.marked_know == 1)
+            .order_by(desc(WordProgress.learned_at))
+        )
+        return [dict(r) for r in res.mappings().all()]
 
 
 async def get_word_grade_map(user_id: int, words: list[str]) -> dict[str, str]:
     uniq = list(dict.fromkeys((w or "").strip().lower() for w in (words or []) if (w or "").strip()))
     if not uniq:
         return {}
-    placeholders = ",".join("?" * len(uniq))
     async with _db_connect() as db:
-        db.row_factory = asyncpg.Record
-        async with db.execute(
-            f"""
-            SELECT word, COALESCE(last_grade, '') AS last_grade, marked_hard, marked_know, seen
-            FROM word_progress
-            WHERE user_id = ? AND word IN ({placeholders})
-            """,
-            (user_id, *uniq),
-        ) as cur:
-            rows = await cur.fetchall()
+        res = await db.execute(
+            select(
+                WordProgress.word,
+                func.coalesce(WordProgress.last_grade, "").label("last_grade"),
+                WordProgress.marked_hard,
+                WordProgress.marked_know,
+                WordProgress.seen,
+            )
+            .where(WordProgress.user_id == user_id, WordProgress.word.in_(uniq))
+        )
+        rows = res.mappings().all()
 
     out: dict[str, str] = {}
     for r in rows:
@@ -1206,48 +1182,38 @@ async def reset_progress(user_id: int, *, preserve_history: bool = True):
 
 
 async def get_admin_overview() -> dict:
+    today = datetime.now().date().isoformat()
     async with _db_connect() as db:
-        db.row_factory = asyncpg.Record
+        res1 = await db.execute(select(func.count()).select_from(User))
+        total_users = int(res1.scalar() or 0)
 
-        async with db.execute("SELECT COUNT(*) AS c FROM users") as cur:
-            total_users = int((await cur.fetchone())["c"])
+        res2 = await db.execute(select(func.count()).select_from(User).where(func.substr(User.joined_at, 1, 10) == today))
+        joined_today = int(res2.scalar() or 0)
 
-        async with db.execute(
-            "SELECT COUNT(*) AS c FROM users WHERE substr(joined_at, 1, 10) = substr(CURRENT_TIMESTAMP::text, 1, 10)"
-        ) as cur:
-            row = await cur.fetchone()
-            joined_today = int(row["c"] if row else 0)
+        res3 = await db.execute(select(func.count()).select_from(User).where(func.substr(User.last_active, 1, 10) == today))
+        active_today = int(res3.scalar() or 0)
 
-        async with db.execute(
-            "SELECT COUNT(*) AS c FROM users WHERE substr(last_active, 1, 10) = substr(CURRENT_TIMESTAMP::text, 1, 10)"
-        ) as cur:
-            row = await cur.fetchone()
-            active_today = int(row["c"] if row else 0)
+        res4 = await db.execute(select(func.count()).select_from(WordProgress).where(WordProgress.learned == 1))
+        learned_total = int(res4.scalar() or 0)
 
-        async with db.execute("SELECT COUNT(*) AS c FROM word_progress WHERE learned = 1") as cur:
-            learned_total = int((await cur.fetchone())["c"])
+        res5 = await db.execute(
+            text("""
+                SELECT word, SUM(wrong) as total_wrong, SUM(correct) as total_correct
+                FROM word_progress
+                GROUP BY word
+                HAVING SUM(wrong) > 0
+                ORDER BY (SUM(wrong) - SUM(correct)) DESC
+                LIMIT 5
+            """)
+        )
+        difficult_words = [dict(r) for r in res5.mappings().all()]
 
-        # Difficult words (global top 5)
-        async with db.execute("""
-            SELECT word, SUM(wrong) as total_wrong, SUM(correct) as total_correct
-            FROM word_progress
-            GROUP BY word
-            HAVING SUM(wrong) > 0
-            ORDER BY (SUM(wrong) - SUM(correct)) DESC
-            LIMIT 5
-        """) as cur:
-            diff_rows = await cur.fetchall()
-            difficult_words = [dict(r) for r in diff_rows]
-
-        # Level distribution
-        async with db.execute("""
-            SELECT COALESCE(user_level, 'A1') as lvl, COUNT(*) as c
-            FROM users
-            GROUP BY lvl
-            ORDER BY lvl ASC
-        """) as cur:
-            lvl_rows = await cur.fetchall()
-            levels = {r['lvl']: r['c'] for r in lvl_rows}
+        res6 = await db.execute(
+            select(func.coalesce(User.user_level, "A1").label("lvl"), func.count().label("c"))
+            .group_by(func.coalesce(User.user_level, "A1"))
+            .order_by(asc("lvl"))
+        )
+        levels = {r.lvl: r.c for r in res6.all()}
 
     return {
         "total_users": total_users,
@@ -1262,36 +1228,28 @@ async def get_admin_overview() -> dict:
 async def get_user_daily_stats(user_id: int) -> dict:
     today = datetime.now().date().isoformat()
     async with _db_connect() as db:
-        db.row_factory = asyncpg.Record
-        # Count words answered today
-        async with db.execute(
-            "SELECT COUNT(*) as c FROM sessions WHERE user_id = ? AND substr(answered_at, 1, 10) = ?",
-            (user_id, today)
-        ) as cur:
-            row = await cur.fetchone()
-            answered_today = int(row["c"] if row else 0)
+        res1 = await db.execute(
+            select(func.count()).where(Session.user_id == user_id, func.substr(Session.answered_at, 1, 10) == today)
+        )
+        answered_today = int(res1.scalar() or 0)
 
-        # Count words MARKED AS LEARNED today
-        async with db.execute(
-            "SELECT COUNT(*) as c FROM word_progress WHERE user_id = ? AND substr(learned_at, 1, 10) = ?",
-            (user_id, today)
-        ) as cur:
-            row = await cur.fetchone()
-            learned_today = int(row["c"] if row else 0)
+        res2 = await db.execute(
+            select(func.count()).where(WordProgress.user_id == user_id, func.substr(WordProgress.learned_at, 1, 10) == today)
+        )
+        learned_today = int(res2.scalar() or 0)
 
-        # Estimate time spent (based on session gaps, simplified)
-        async with db.execute(
-            "SELECT MIN(answered_at) as first, MAX(answered_at) as last FROM sessions WHERE user_id = ? AND substr(answered_at, 1, 10) = ?",
-            (user_id, today)
-        ) as cur:
-            row = await cur.fetchone()
-            if row and row["first"] and row["last"]:
-                start = datetime.fromisoformat(row["first"])
-                end = datetime.fromisoformat(row["last"])
-                diff = end - start
-                minutes = round(diff.total_seconds() / 60)
-            else:
-                minutes = 0
+        res3 = await db.execute(
+            select(func.min(Session.answered_at).label("first"), func.max(Session.answered_at).label("last"))
+            .where(Session.user_id == user_id, func.substr(Session.answered_at, 1, 10) == today)
+        )
+        row = res3.mappings().first()
+        if row and row["first"] and row["last"]:
+            start = datetime.fromisoformat(row["first"])
+            end = datetime.fromisoformat(row["last"])
+            diff = end - start
+            minutes = round(diff.total_seconds() / 60)
+        else:
+            minutes = 0
 
     return {
         "answered_today": answered_today,
@@ -1302,28 +1260,39 @@ async def get_user_daily_stats(user_id: int) -> dict:
 
 async def get_user_full_profile(user_id: int) -> dict | None:
     async with _db_connect() as db:
-        db.row_factory = asyncpg.Record
-        async with db.execute("""
-            SELECT * FROM users WHERE user_id = ?
-        """, (user_id,)) as cur:
-            user = await cur.fetchone()
-
+        res_u = await db.execute(select(User).where(User.user_id == user_id))
+        user = res_u.scalar_one_or_none()
         if not user:
             return None
 
-        async with db.execute("""
-            SELECT
-                COUNT(*) as seen,
-                SUM(marked_know) as learned,
-                SUM(marked_hard) as hard,
-                SUM(correct) as correct,
-                SUM(wrong) as wrong
-            FROM word_progress WHERE user_id = ?
-        """, (user_id,)) as cur:
-            prog = await cur.fetchone()
+        res_p = await db.execute(
+            select(
+                func.count().label("seen"),
+                func.coalesce(func.sum(WordProgress.marked_know), 0).label("learned"),
+                func.coalesce(func.sum(WordProgress.marked_hard), 0).label("hard"),
+                func.coalesce(func.sum(WordProgress.correct), 0).label("correct"),
+                func.coalesce(func.sum(WordProgress.wrong), 0).label("wrong"),
+            ).where(WordProgress.user_id == user_id)
+        )
+        prog = res_p.mappings().first()
 
+        user_dict = {
+            "user_id": user.user_id,
+            "username": user.username or "",
+            "joined_at": user.joined_at,
+            "last_active": user.last_active,
+            "streak": user.streak,
+            "daily_count": user.daily_count,
+            "daily_date": user.daily_date,
+            "user_level": user.user_level,
+            "banned": user.banned,
+            "ban_reason": user.ban_reason,
+            "user_plan": user.user_plan,
+            "placement_done": user.placement_done,
+            "placement_score": user.placement_score,
+        }
         return {
-            "info": dict(user),
+            "info": user_dict,
             "stats": dict(prog) if prog else {}
         }
 
@@ -1331,89 +1300,74 @@ async def get_user_full_profile(user_id: int) -> dict | None:
 async def get_health_snapshot() -> dict:
     """Basic DB health check + key row counts for admin /health command."""
     async with _db_connect() as db:
-        db.row_factory = asyncpg.Record
+        res_ok = await db.execute(select(1))
+        db_ok = bool(res_ok.scalar() == 1)
 
-        async with db.execute("SELECT 1 AS ok") as cur:
-            row = await cur.fetchone()
-        db_ok = bool(row and int(row["ok"] or 0) == 1)
-
-        async with db.execute("SELECT COUNT(*) AS c FROM users") as cur:
-            users_row = await cur.fetchone()
-        async with db.execute("SELECT COUNT(*) AS c FROM word_progress") as cur:
-            progress_row = await cur.fetchone()
-        async with db.execute("SELECT COUNT(*) AS c FROM sessions") as cur:
-            sessions_row = await cur.fetchone()
-        async with db.execute("SELECT COUNT(*) AS c FROM story_history") as cur:
-            stories_row = await cur.fetchone()
-        async with db.execute("SELECT COUNT(*) AS c FROM memory_palace_history") as cur:
-            palaces_row = await cur.fetchone()
+        res_u = await db.execute(select(func.count()).select_from(User))
+        res_wp = await db.execute(select(func.count()).select_from(WordProgress))
+        res_s = await db.execute(select(func.count()).select_from(Session))
+        res_sh = await db.execute(select(func.count()).select_from(StoryHistory))
+        res_mp = await db.execute(select(func.count()).select_from(MemoryPalaceHistory))
 
     return {
         "db_ok": db_ok,
-        "users": int((users_row["c"] if users_row else 0) or 0),
-        "word_progress": int((progress_row["c"] if progress_row else 0) or 0),
-        "sessions": int((sessions_row["c"] if sessions_row else 0) or 0),
-        "story_history": int((stories_row["c"] if stories_row else 0) or 0),
-        "memory_palace_history": int((palaces_row["c"] if palaces_row else 0) or 0),
+        "users": int(res_u.scalar() or 0),
+        "word_progress": int(res_wp.scalar() or 0),
+        "sessions": int(res_s.scalar() or 0),
+        "story_history": int(res_sh.scalar() or 0),
+        "memory_palace_history": int(res_mp.scalar() or 0),
     }
 
 
 async def get_all_users(limit: int = 200) -> list[dict]:
     safe_limit = max(1, min(int(limit or 200), 1000))
     async with _db_connect() as db:
-        db.row_factory = asyncpg.Record
-        async with db.execute(
-            """
-            SELECT
-                u.user_id,
-                u.username,
-                u.joined_at,
-                u.last_active,
-                u.streak,
-                u.daily_count,
-                u.user_level,
-                COALESCE(u.banned, 0) AS banned,
-                u.ban_reason
-            FROM users u
-            ORDER BY COALESCE(u.last_active, u.joined_at) DESC, u.user_id DESC
-            LIMIT ?
-            """,
-            (safe_limit,),
-        ) as cur:
-            rows = await cur.fetchall()
-    return [dict(r) for r in rows]
+        res = await db.execute(
+            select(
+                User.user_id,
+                User.username,
+                User.joined_at,
+                User.last_active,
+                User.streak,
+                User.daily_count,
+                User.user_level,
+                func.coalesce(User.banned, 0).label("banned"),
+                User.ban_reason,
+            )
+            .order_by(desc(func.coalesce(User.last_active, User.joined_at)), desc(User.user_id))
+            .limit(safe_limit)
+        )
+        return [dict(r) for r in res.mappings().all()]
 
 
 async def get_all_user_ids() -> list[int]:
     async with _db_connect() as db:
-        async with db.execute("SELECT user_id FROM users ORDER BY user_id ASC") as cur:
-            rows = await cur.fetchall()
-    return [int(r[0]) for r in rows]
+        res = await db.execute(select(User.user_id).order_by(asc(User.user_id)))
+        return [int(r[0]) for r in res.all()]
 
 
 async def get_top_leaderboard(limit: int = 10) -> list[dict]:
     safe_limit = max(1, min(int(limit or 10), 50))
     async with _db_connect() as db:
-        db.row_factory = asyncpg.Record
-        async with db.execute(
-            """
-            SELECT
-                u.user_id,
-                u.username,
-                u.streak,
-                u.user_level,
-                COALESCE(SUM(wp.marked_know), 0) AS learned_count,
-                COALESCE(SUM(wp.correct), 0) AS total_correct,
-                COALESCE(SUM(wp.wrong), 0) AS total_wrong
-            FROM users u
-            LEFT JOIN word_progress wp ON wp.user_id = u.user_id
-            GROUP BY u.user_id, u.username, u.streak, u.user_level
-            ORDER BY learned_count DESC, total_correct DESC, u.streak DESC, u.user_id ASC
-            LIMIT ?
-            """,
-            (safe_limit,),
-        ) as cur:
-            rows = await cur.fetchall()
+        res = await db.execute(
+            text("""
+                SELECT
+                    u.user_id,
+                    u.username,
+                    u.streak,
+                    u.user_level,
+                    COALESCE(SUM(wp.marked_know), 0) AS learned_count,
+                    COALESCE(SUM(wp.correct), 0) AS total_correct,
+                    COALESCE(SUM(wp.wrong), 0) AS total_wrong
+                FROM users u
+                LEFT JOIN word_progress wp ON wp.user_id = u.user_id
+                GROUP BY u.user_id, u.username, u.streak, u.user_level
+                ORDER BY learned_count DESC, total_correct DESC, u.streak DESC, u.user_id ASC
+                LIMIT :safe_limit
+            """),
+            {"safe_limit": safe_limit},
+        )
+        rows = res.mappings().all()
 
     out: list[dict] = []
     for r in rows:
@@ -1435,13 +1389,11 @@ async def get_top_leaderboard(limit: int = 10) -> list[dict]:
 
 async def is_banned(user_id: int) -> bool:
     async with _db_connect() as db:
-        db.row_factory = asyncpg.Record
-        async with db.execute(
-            "SELECT COALESCE(banned, 0) AS banned FROM users WHERE user_id = ?",
-            (user_id,),
-        ) as cur:
-            row = await cur.fetchone()
-    return bool(row and int(row["banned"] or 0) == 1)
+        res = await db.execute(
+            select(func.coalesce(User.banned, 0)).where(User.user_id == user_id)
+        )
+        val = res.scalar()
+    return val == 1
 
 
 async def find_user_id_by_username(username: str) -> int | None:
@@ -1449,34 +1401,29 @@ async def find_user_id_by_username(username: str) -> int | None:
     if not clean:
         return None
     async with _db_connect() as db:
-        db.row_factory = asyncpg.Record
-        async with db.execute(
-            """
-            SELECT user_id
-            FROM users
-            WHERE lower(COALESCE(username, '')) = lower(?)
-            ORDER BY COALESCE(last_active, joined_at) DESC
-            LIMIT 1
-            """,
-            (clean,),
-        ) as cur:
-            row = await cur.fetchone()
-    return int(row["user_id"]) if row else None
+        res = await db.execute(
+            select(User.user_id)
+            .where(func.lower(func.coalesce(User.username, "")) == clean.lower())
+            .order_by(desc(func.coalesce(User.last_active, User.joined_at)))
+            .limit(1)
+        )
+        row = res.first()
+    return int(row[0]) if row else None
 
 
 async def set_user_ban(user_id: int, banned: bool, reason: str = "") -> bool:
     reason = (reason or "").strip()[:300]
     async with _db_connect() as db:
-        cur = await db.execute(
-            """
-            UPDATE users
-            SET banned = ?, ban_reason = CASE WHEN ? = 1 THEN ? ELSE NULL END
-            WHERE user_id = ?
-            """,
-            (1 if banned else 0, 1 if banned else 0, reason, user_id),
+        res = await db.execute(
+            update(User)
+            .where(User.user_id == user_id)
+            .values(
+                banned=1 if banned else 0,
+                ban_reason=reason if banned else None,
+            )
         )
         await db.commit()
-    return (cur.rowcount or 0) > 0
+    return (res.rowcount or 0) > 0
 
 
 async def log_admin_action(
@@ -1493,37 +1440,36 @@ async def log_admin_action(
     safe_details = (details or "").strip()[:2000]
 
     async with _db_connect() as db:
-        sql = (
-            f"""
-            INSERT INTO {ADMIN_AUDIT_TABLE}
-                (actor_user_id, target_user_id, action, details, metadata_json, created_at)
-            VALUES (?, ?, ?, ?, ?, ?)
-            """
+        res = await db.execute(
+            insert(AuditLog).values(
+                actor_user_id=int(actor_user_id),
+                target_user_id=target_user_id,
+                action=safe_action,
+                details=safe_details,
+                metadata_json=meta_json,
+                created_at=now,
+            )
         )
-        sql += " RETURNING id"
-        cur = await db.execute(
-            sql,
-            (int(actor_user_id), target_user_id, safe_action, safe_details, meta_json, now),
-        )
-        await db.commit()
-        row = await cur.fetchone()
-        return int((row["id"] if row else 0) or 0)
+        return int(res.inserted_primary_key[0] if res.inserted_primary_key else 0)
 
 
 async def get_admin_audit_logs(limit: int = 20) -> list[dict]:
     safe_limit = max(1, min(int(limit or 20), 200))
     async with _db_connect() as db:
-        db.row_factory = asyncpg.Record
-        async with db.execute(
-            f"""
-            SELECT id, actor_user_id, target_user_id, action, details, metadata_json, created_at
-            FROM {ADMIN_AUDIT_TABLE}
-            ORDER BY id DESC
-            LIMIT ?
-            """,
-            (safe_limit,),
-        ) as cur:
-            rows = await cur.fetchall()
+        res = await db.execute(
+            select(
+                AuditLog.id,
+                AuditLog.actor_user_id,
+                AuditLog.target_user_id,
+                AuditLog.action,
+                AuditLog.details,
+                AuditLog.metadata_json,
+                AuditLog.created_at,
+            )
+            .order_by(desc(AuditLog.id))
+            .limit(safe_limit)
+        )
+        rows = res.mappings().all()
     out: list[dict] = []
     for r in rows:
         d = dict(r)
@@ -1541,24 +1487,19 @@ async def get_admin_audit_logs(limit: int = 20) -> list[dict]:
 
 async def get_voice_file_id(word: str) -> str | None:
     async with _db_connect() as db:
-        db.row_factory = asyncpg.Record
-        async with db.execute(
-            "SELECT file_id FROM word_audio_cache WHERE word = ?",
-            (word.strip().lower(),)
-        ) as cur:
-            row = await cur.fetchone()
-    return row["file_id"] if row else None
+        res = await db.execute(
+            select(WordAudioCache.file_id).where(WordAudioCache.word == word.strip().lower())
+        )
+        return res.scalar_one_or_none()
 
 
 async def save_voice_file_id(word: str, file_id: str):
     now = datetime.now().isoformat()
     async with _db_connect() as db:
+        await _insert_ignore(db, WordAudioCache, {"word": word.strip().lower(), "file_id": file_id, "created_at": now})
         await db.execute(
-            """
-            INSERT INTO word_audio_cache (word, file_id, created_at)
-            VALUES (?, ?, ?)
-            ON CONFLICT (word) DO UPDATE SET file_id = EXCLUDED.file_id, created_at = EXCLUDED.created_at
-            """,
-            (word.strip().lower(), file_id, now)
+            update(WordAudioCache)
+            .where(WordAudioCache.word == word.strip().lower())
+            .values(file_id=file_id, created_at=now)
         )
         await db.commit()

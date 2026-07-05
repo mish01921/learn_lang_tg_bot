@@ -1,9 +1,19 @@
 import os
+import sys
 from pathlib import Path
 
 
 def _load_local_env() -> None:
     """Minimal .env loader to avoid external dependency in restricted environments."""
+    # Avoid loading developer-local `.env` during automated tests (pytest/unittest),
+    # so tests don't accidentally depend on local secrets or services (e.g. Postgres).
+    if (
+        os.getenv("PYTEST_CURRENT_TEST") is not None
+        or "pytest" in sys.modules
+        or "unittest" in sys.modules
+        or any("unittest" in arg for arg in sys.argv)
+    ):
+        return
     # Check current dir, then one up, then two up
     possible_paths = [
         Path(".env"),
@@ -27,7 +37,8 @@ def _load_local_env() -> None:
             key, value = line.split("=", 1)
             key = key.strip()
             value = value.strip().strip('"').strip("'")
-            if key and key not in os.environ:
+            if key:
+                # Locally, if .env exists, let it override stale shell environment variables
                 os.environ[key] = value
     except Exception:
         # Ignore malformed .env; runtime validation happens in bot.py.
@@ -42,11 +53,11 @@ def _getenv(name: str, default: str = "") -> str:
 
 
 # Keep a test-safe fallback so imports don't fail in local tests.
-# Prioritize BOT_TOKEN (standard), fallback to TOKEN (legacy)
-TOKEN = _getenv("BOT_TOKEN", _getenv("TOKEN", "123456:TEST_TOKEN"))
+# Prioritize BOT_TOKEN (standard), fallback to TOKEN or BOT (legacy/alternatives)
+TOKEN = _getenv("BOT_TOKEN", _getenv("TOKEN", _getenv("BOT", "123456:TEST_TOKEN")))
 GEMINI_API_KEY = _getenv("GEMINI_API_KEY", "")
 GOOGLE_TRANSLATE_API_KEY = _getenv("GOOGLE_TRANSLATE_API_KEY", "")
-DATABASE_URL = _getenv("DATABASE_URL", "postgresql+asyncpg://user:password@localhost/english_bot_db")
+DATABASE_URL = _getenv("DATABASE_URL", "sqlite:///./.test_sqlite.db")
 
 
 def _parse_admin_ids(raw: str) -> set[int]:

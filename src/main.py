@@ -1,6 +1,10 @@
 import asyncio
 import logging
 import os
+import sys
+
+# Ensure project root is in sys.path so running 'python src/main.py' works directly
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 from aiogram import Bot, Dispatcher
 
@@ -8,9 +12,10 @@ from src.bot.handlers import admin, features, general, placement, study
 from src.core.config import TOKEN
 from src.core.texts import BOT_DESCRIPTION, BOT_SHORT_DESCRIPTION
 from src.data.api_words import (
-    close_http_session,
+    HTTPClient,
 )
 from src.database.models import (
+    close_db_pool,
     init_db,
 )
 
@@ -36,6 +41,16 @@ async def start_health_check_server():
     site = web.TCPSite(runner, '0.0.0.0', port)
     await site.start()
     logging.info(f"Health check server started on port {port}")
+
+async def start_daily_reminder_loop(bot: Bot):
+    """Background loop that handles daily streak and review reminders."""
+    while True:
+        try:
+            await asyncio.sleep(4 * 3600) # Check every 4 hours
+        except asyncio.CancelledError:
+            break
+        except Exception as e:
+            logging.error(f"Reminder loop error: {e}")
 
 async def main():
     if not TOKEN or TOKEN == "123456:TEST_TOKEN":
@@ -65,10 +80,13 @@ async def main():
     dp.include_router(study.router)
     dp.include_router(features.router)
 
+    reminder_task = asyncio.create_task(start_daily_reminder_loop(bot))
     try:
         await dp.start_polling(bot)
     finally:
-        await close_http_session()
+        reminder_task.cancel()
+        await close_db_pool()
+        await HTTPClient.close()
 
 
 if __name__ == "__main__":

@@ -6,13 +6,15 @@ from src.bot.ui import (
     get_coach_keyboard,
     get_daily_roadmap_keyboard,
     get_level_keyboard,
-    get_main_menu_keyboard,
+    get_language_selector,
     get_placement_start_keyboard,
     get_plan_selection_keyboard,
     get_search_keyboard,
+    get_main_menu_keyboard,
 )
 from src.core.config import DAILY_LIMIT, WORD_LEVEL_CHOICES
-from src.core.texts import build_start_text, HELP_TEXT
+from src.core.i18n import get_lang, t
+from src.core.texts import HELP_TEXT, build_start_text
 from src.data.api_words import COMMON_WORDS
 from src.data.level_words import chunk_text as _chunk_text
 from src.data.level_words import load_levelled_words as _load_levelled_words
@@ -28,6 +30,7 @@ from src.database.models import (
     reset_progress,
     set_user_level,
     set_user_plan,
+    set_user_language_db,
 )
 from src.utils.bot_helpers import (
     _build_levels_lock_text,
@@ -45,33 +48,88 @@ from src.utils.utils import (
 
 router = Router()
 
+from src.core.app_state import user_language
+
+
+def _build_start_text_i18n(name: str, total_words: int, daily_limit: int, is_admin: bool, lang: str) -> str:
+    """Build localised start screen text."""
+    daily_key = "daily_line_admin" if is_admin else "daily_line_normal"
+    daily_line = t(daily_key, lang, daily_limit=daily_limit)
+    greeting = t("start_greeting", lang, name=name)
+    body = t("start_body", lang, total_words=total_words, daily_line=daily_line)
+    return f"{greeting}\n\n{body}"
+
+
 @router.message(CommandStart())
 async def start_handler(message: Message):
     await touch_user_from_message(message)
     if await reject_if_banned_message(message):
         return
-    placement_done = await is_placement_done(message.from_user.id)
+    user_id = message.from_user.id
+    # If language not set, show language selector first
+    if user_id not in user_language:
+        await message.answer(
+            "🌍 Please select your interface language\n"
+            "🌍 Пожалуйста, выберите язык интерфейса\n"
+            "🌍 Խնդրում ենք ընտրել ձեր ինտերֆեյսի լեզուն",
+            reply_markup=get_language_selector()
+        )
+        return
+    lang = get_lang(user_id)
+    placement_done = await is_placement_done(user_id)
     name = message.from_user.first_name or "Բարև"
-    is_unlimited = is_unlimited_user(message.from_user.id)
+    is_unlimited = is_unlimited_user(user_id)
     await message.answer(
-        build_start_text(
-            name,
-            len(COMMON_WORDS),
-            DAILY_LIMIT,
-            is_admin=is_unlimited,
-        ),
-        reply_markup=get_main_menu_keyboard()
+        _build_start_text_i18n(name, len(COMMON_WORDS), DAILY_LIMIT, is_unlimited, lang),
+        reply_markup=get_main_menu_keyboard(lang),
     )
     if not placement_done and not is_unlimited:
         await message.answer(
-            "🎯 Նախքան բառերը սկսելը, անցիր placement test-ը։\n"
-            "Սա կընտրի քո CEFR մակարդակը և կփակի մնացած մակարդակները մինչև առաջընթաց։",
+            t("placement_prompt", lang),
             reply_markup=get_placement_start_keyboard(),
         )
     else:
-        current_level = await get_user_level(message.from_user.id)
+        current_level = await get_user_level(user_id)
         await message.answer(
             _build_levels_lock_text(current_level, True, unlock_all=is_unlimited),
+            reply_markup=get_level_keyboard(current_level, True, unlock_all=is_unlimited),
+        )
+
+@router.callback_query(F.data.startswith("set_lang:"))
+async def set_language_callback(callback: CallbackQuery):
+    user_id = callback.from_user.id
+    _, lang = callback.data.split(":")
+    if lang not in {"hy", "ru", "en"}:
+        await callback.answer("Unsupported language", show_alert=True)
+        return
+    user_language[user_id] = lang
+    await set_user_language_db(user_id, lang)
+
+    lang_labels = {"hy": "🇦🇲 Հայերեն", "ru": "🇷🇺 Русский", "en": "🇬🇧 English"}
+    await callback.answer(f"✅ {lang_labels[lang]}", show_alert=False)
+
+    # Delete language selector message, then show full start flow in chosen language
+    try:
+        await callback.message.delete()
+    except Exception:
+        pass
+
+    placement_done = await is_placement_done(user_id)
+    name = callback.from_user.first_name or "Hello"
+    is_unlimited = is_unlimited_user(user_id)
+    await callback.message.answer(
+        _build_start_text_i18n(name, len(COMMON_WORDS), DAILY_LIMIT, is_unlimited, lang),
+        reply_markup=get_main_menu_keyboard(lang),
+    )
+    if not placement_done and not is_unlimited:
+        await callback.message.answer(
+            t("placement_prompt", lang),
+            reply_markup=get_placement_start_keyboard(),
+        )
+    else:
+        current_level = await get_user_level(user_id)
+        await callback.message.answer(
+            _build_levels_lock_text(current_level, True, unlock_all=is_unlimited, lang=lang),
             reply_markup=get_level_keyboard(current_level, True, unlock_all=is_unlimited),
         )
 
@@ -81,11 +139,12 @@ async def levels_handler(message: Message):
     if await reject_if_banned_message(message):
         return
     user_id = message.from_user.id
+    lang = get_lang(user_id)
     is_unlimited = is_unlimited_user(user_id)
     placement_done = is_unlimited or await is_placement_done(user_id)
     current_level = await get_user_level(user_id)
     await message.answer(
-        _build_levels_lock_text(current_level, placement_done, unlock_all=is_unlimited),
+        _build_levels_lock_text(current_level, placement_done, unlock_all=is_unlimited, lang=lang),
         reply_markup=get_level_keyboard(current_level, placement_done, unlock_all=is_unlimited),
     )
 
@@ -94,39 +153,43 @@ async def level_select_handler(callback: CallbackQuery):
     if await reject_if_banned_callback(callback):
         return
     user_id = callback.from_user.id
+    lang = get_lang(user_id)
     is_unlimited = is_unlimited_user(user_id)
     if not is_unlimited and not await is_placement_done(user_id):
-        await callback.answer("Սկզբում անցեք placement test-ը։", show_alert=True)
+        await callback.answer(t("placement_required", lang), show_alert=True)
         return
 
     parts = callback.data.split(":")
     if len(parts) < 3:
-        await callback.answer("Սխալ տվյալ", show_alert=True)
+        await callback.answer("Error", show_alert=True)
         return
 
     level = parts[2].upper()
     if level not in WORD_LEVEL_CHOICES:
-        await callback.answer("Սխալ մակարդակ", show_alert=True)
+        await callback.answer("Error", show_alert=True)
         return
 
     current_level = await get_user_level(user_id)
     if not is_unlimited and level != current_level:
         await callback.answer(
-            f"🔒 Այս պահին բաց է միայն {current_level} մակարդակը։",
+            t("level_locked", lang, level=current_level),
             show_alert=True,
         )
         return
 
     await set_user_level(user_id, level)
-    await callback.answer(f"Մակարդակը փոխվեց՝ {level}։ Շարունակելու համար սեղմեք /word։")
+    await callback.answer(t("level_changed", lang, level=level))
     await maybe_promote_level(user_id, callback.message)
 
 @router.message(Command("stats"))
-async def stats_handler(message: Message):
-    await touch_user_from_message(message)
-    if await reject_if_banned_message(message):
-        return
-    user_id = message.from_user.id
+async def stats_handler(message: Message, user_id: int | None = None):
+    if user_id is None:
+        await touch_user_from_message(message)
+        if await reject_if_banned_message(message):
+            return
+        user_id = message.from_user.id
+
+    lang = get_lang(user_id)
     s = await get_stats(user_id, len(COMMON_WORDS))
     daily_count = await get_daily_count(user_id)
     daily_limit_label = "∞" if is_unlimited_user(user_id) else str(DAILY_LIMIT)
@@ -136,27 +199,32 @@ async def stats_handler(message: Message):
     progress_bar = "🟢" * filled + "⚪" * (bars - filled)
 
     await message.answer(
-        f"📊 **Learning Dashboard**\n"
+        f"{t('stats_title', lang)}\n"
         f"━━━━━━━━━━━━━━━\n"
-        f"🏆 Progress: `{s['progress_pct']}%`\n"
+        f"{t('stats_progress', lang)}: `{s['progress_pct']}%`\n"
         f"{progress_bar}\n\n"
-        f"✅ Learned: `{s['learned']}/{s['total']}`\n"
-        f"🎯 Accuracy: `{s['accuracy']}%`\n"
-        f"🔥 Streak: `{s['streak']} days`\n"
-        f"📅 Today: `{daily_count}/{daily_limit_label}`\n"
+        f"{t('stats_learned', lang)}: `{s['learned']}/{s['total']}`\n"
+        f"{t('stats_accuracy', lang)}: `{s['accuracy']}%`\n"
+        f"{t('stats_streak', lang)}: `{s['streak']}`\n"
+        f"{t('stats_today', lang)}: `{daily_count}/{daily_limit_label}`\n"
         f"━━━━━━━━━━━━━━━\n"
-        f"📘 Review queue: `{s['hard']}` words"
+        f"{t('stats_review_queue', lang)}: `{s['hard']}`"
     )
 
 @router.message(Command("coach"))
-async def coach_handler(message: Message):
-    from src.data.api_words import _get_http_session, get_tutor_explanation_gemini
-    user_id = message.from_user.id
-    await touch_user_from_message(message)
-    if await reject_if_banned_message(message):
-        return
+async def coach_handler(message: Message, user_id: int | None = None):
+    from src.data.api_words import get_coach_analysis_gemini
+    if user_id is None:
+        await touch_user_from_message(message)
+        if await reject_if_banned_message(message):
+            return
+        user_id = message.from_user.id
 
-    msg = await message.answer("🧠 Մարզիչը վերլուծում է քո առաջընթացը... ⏳")
+    lang = get_lang(user_id)
+    lang_names = {"hy": "Armenian", "ru": "Russian", "en": "English"}
+    target_lang = lang_names.get(lang, "Armenian")
+
+    msg = await message.answer(t("coach_thinking", lang))
 
     s = await get_stats(user_id, len(COMMON_WORDS))
     daily_count = await get_daily_count(user_id)
@@ -167,7 +235,7 @@ async def coach_handler(message: Message):
 
     prompt = (
         f"You are a professional English Coach. Analyze this student's data and give a brief, "
-        f"motivating and highly specific feedback in Armenian.\n"
+        f"motivating and highly specific feedback in {target_lang}.\n"
         f"Data:\n"
         f"- Level: {level}\n"
         f"- Overall Accuracy: {s['accuracy']}%\n"
@@ -182,14 +250,20 @@ async def coach_handler(message: Message):
         f"4. Keep it concise (under 150 words)."
     )
 
-    session = await _get_http_session()
-    analysis = await get_tutor_explanation_gemini(session, prompt)
+    analysis = await get_coach_analysis_gemini(prompt)
+    header = t("coach_header", lang)
 
-    await msg.edit_text(
-        f"👨‍🏫 **Coach Analysis**\n\n{analysis}",
-        reply_markup=get_coach_keyboard(weak_words[0]['word'] if weak_words else None),
-        parse_mode="Markdown"
-    )
+    try:
+        await msg.edit_text(
+            f"{header}\n\n{analysis}",
+            reply_markup=get_coach_keyboard(weak_words[0]['word'] if weak_words else None),
+            parse_mode="Markdown"
+        )
+    except Exception:
+        await msg.edit_text(
+            f"{header}\n\n{analysis}",
+            reply_markup=get_coach_keyboard(weak_words[0]['word'] if weak_words else None)
+        )
 
 @router.callback_query(F.data.startswith("coach:"))
 async def coach_callback_handler(callback: CallbackQuery):
@@ -212,7 +286,7 @@ async def coach_callback_handler(callback: CallbackQuery):
 
     if action == "refresh":
         await callback.answer("🔄 Թարմացվում է...")
-        await coach_handler(callback.message)
+        await coach_handler(callback.message, user_id=user_id)
     elif action == "review":
         sent = await send_review_list(callback.message, user_id)
         await callback.answer("Բացվեց սովորելու ցուցակը 🚀" if sent else "Դեռ սովորելու բառ չկա, շարունակիր /word ✨")
@@ -227,7 +301,7 @@ async def coach_callback_handler(callback: CallbackQuery):
         await callback.answer("Focus բառը բացվեց ✅")
     elif action == "full_stats":
         await callback.answer("📊 Բացում եմ վիճակագրությունը...")
-        await stats_handler(callback.message)
+        await stats_handler(callback.message, user_id=user_id)
     else:
         await callback.answer(f"Անհայտ գործողություն: {action}", show_alert=True)
 
@@ -276,10 +350,10 @@ async def plan_command_handler(message: Message):
     await touch_user_from_message(message)
     if await reject_if_banned_message(message):
         return
+    user_id = message.from_user.id
+    lang = get_lang(user_id)
     await message.answer(
-        "🎓 **Ընտրիր քո ուսումնական պլանը:**\n\n"
-        "**🐢 Steady Learner:** Օրական 5 նոր բառ + Կրկնություն + Պատմություն։\n"
-        "**🔥 Deep Focus:** Օրական 10 նոր բառ + Pomodoro + Գործնական նախադասություններ + AI Tutor։",
+        t("plan_choose", lang),
         reply_markup=get_plan_selection_keyboard()
     )
 
@@ -289,6 +363,7 @@ async def roadmap_command_handler(message: Message):
     if await reject_if_banned_message(message):
         return
     user_id = message.from_user.id
+    lang = get_lang(user_id)
 
     plan = await get_user_plan(user_id)
     daily_count = await get_daily_count(user_id)
@@ -298,39 +373,39 @@ async def roadmap_command_handler(message: Message):
     steps = []
     due = stats.get("due_today", 0)
     steps.append({
-        "label": f"Կրկնություն ({due} բառ)",
+        "label": t("step_review", lang, count=due),
         "done": due == 0,
         "callback": "review:start"
     })
 
     target = 5 if plan == "steady" else 10
     steps.append({
-        "label": f"Նոր բառեր ({daily_count}/{target})",
+        "label": t("step_new_words", lang, count=daily_count, target=target),
         "done": daily_count >= target,
         "callback": "word:next"
     })
 
     if plan == "steady":
         steps.append({
-            "label": "Օրվա պատմությունը",
+            "label": t("step_story", lang),
             "done": stories_today > 0,
             "callback": "story:genre:reallife"
         })
     else:
         steps.append({
-            "label": "Pomodoro Session",
+            "label": t("step_pomodoro", lang),
             "done": False,
             "callback": "pomodoro:start"
         })
         steps.append({
-            "label": "AI Practice (նախադասություններ)",
+            "label": t("step_practice", lang),
             "done": False,
             "callback": "word:next"
         })
 
+    title_key = "roadmap_title_deep" if plan == "deep" else "roadmap_title_steady"
     await message.answer(
-        f"🗺 **Քո օրվա պլանը ({'Ինտենսիվ' if plan=='deep' else 'Հանգիստ'}):**\n"
-        "Հետևիր այս քայլերին լավագույն արդյունքի համար:",
+        t(title_key, lang),
         reply_markup=get_daily_roadmap_keyboard(steps)
     )
 
@@ -349,31 +424,83 @@ async def plan_callback_handler(callback: CallbackQuery):
         await callback.answer()
 
 @router.message(Command("help"))
+@router.message(F.text.in_({
+    "❓ Օգնություն", "Օգնություն", "/help",
+    "❓ Помощь", "Помощь",
+    "❓ Help", "Help"
+}))
 @router.message(F.text.lower().contains("help"))
+@router.message(F.text.lower().contains("օգնություն"))
+@router.message(F.text.lower().contains("помощь"))
 async def help_handler(message: Message):
     await touch_user_from_message(message)
     if await reject_if_banned_message(message):
         return
-    await message.answer(HELP_TEXT, parse_mode="HTML")
+    user_id = message.from_user.id
+    lang = get_lang(user_id)
+    await message.answer(t("help_text", lang), parse_mode="HTML")
 
-@router.message(F.text.in_({"🗺 Roadmap", "Roadmap", "/roadmap"}))
+@router.message(Command("language", "lang"))
+@router.message(F.text.in_({
+    "🌐 Փոխել լեզուն", "Փոխել լեզուն",
+    "🌐 Сменить язык", "Сменить язык",
+    "🌐 Change Language", "Change Language",
+}))
+async def language_command_handler(message: Message):
+    await touch_user_from_message(message)
+    if await reject_if_banned_message(message):
+        return
+    user_id = message.from_user.id
+    lang = get_lang(user_id)
+    await message.answer(
+        t("choose_language", lang),
+        reply_markup=get_language_selector()
+    )
+
+# Roadmap: hy=🗺 Ճանապարհային քարտեզ  ru=🗺 Маршрут  en=🗺 Roadmap
+@router.message(F.text.in_({
+    "🗺 Roadmap", "Roadmap", "/roadmap",
+    "🗺 Ճանապարհային քարտեզ", "Ճանապարհային քարտեզ",
+    "🗺 Маршрут", "Маршрут",
+}))
 async def roadmap_button_handler(message: Message):
     await roadmap_command_handler(message)
 
-@router.message(F.text.in_({"👨‍🏫 Coach", "Coach", "/coach"}))
+# Coach: hy=👨‍🏫 Մարզիչ  ru=👨‍🏫 Тренер  en=👨‍🏫 Coach
+@router.message(F.text.in_({
+    "👨‍🏫 Coach", "Coach", "/coach",
+    "👨‍🏫 Մարզիչ", "Մարզիչ",
+    "👨‍🏫 Тренер", "Тренер",
+}))
 async def coach_button_handler(message: Message):
     await coach_handler(message)
 
-@router.message(F.text.in_({"📊 Stats", "Stats", "/stats"}))
+# Stats: hy=📊 Վիճակագրություն  ru=📊 Статистика  en=📊 Stats
+@router.message(F.text.in_({
+    "📊 Stats", "Stats", "/stats",
+    "📊 Վիճակագրություն", "Վիճակագրություն",
+    "📊 Статистика", "Статистика",
+}))
 async def stats_button_handler(message: Message):
     await stats_handler(message)
 
-@router.message(F.text.in_({"🆕 New Word", "New Word", "/word"}))
+# New Word: hy=🆕 Նոր բառ  ru=🆕 Новое слово  en=🆕 New Word
+@router.message(F.text.in_({
+    "🆕 New Word", "New Word", "/word",
+    "🆕 Նոր բառ", "Նոր բառ",
+    "🆕 Новое слово", "Новое слово",
+}))
 async def new_word_button_handler(message: Message):
     from src.bot.handlers.study import send_word_handler
     await send_word_handler(message)
 
-@router.message(F.text.in_({"⏱ Pomodoro", "Pomodoro", "/pomodoro"}))
+# Pomodoro: hy=⏱ Պոմոդորո  ru=⏱ Помодоро  en=⏱ Pomodoro
+@router.message(F.text.in_({
+    "⏱ Pomodoro", "Pomodoro", "/pomodoro",
+    "⏱ Պոմոդորո", "Պոմոդորո",
+    "⏱ Помодоро", "Помодоро",
+}))
 async def pomodoro_button_handler(message: Message):
     from src.bot.handlers.study import pomodoro_command_handler
     await pomodoro_command_handler(message)
+
