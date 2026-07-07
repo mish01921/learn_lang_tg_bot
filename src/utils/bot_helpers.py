@@ -1,4 +1,5 @@
 import asyncio
+import logging
 
 from aiogram.types import CallbackQuery, Message
 
@@ -17,7 +18,6 @@ from src.core.app_state import (
     record_temp_message,
     review_sessions,
     story_translation_overrides,
-    user_language,
     user_word_history,
 )
 from src.core.config import DAILY_LIMIT
@@ -28,6 +28,7 @@ from src.data.level_words import extract_headword as _extract_headword
 from src.data.level_words import load_levelled_words as _load_levelled_words
 from src.database.models import (
     get_daily_count,
+    get_daily_limit,
     get_hard_words,
     get_next_word,
     get_user_level,
@@ -87,7 +88,7 @@ def _grade_tag(grade: str | None) -> str:
     return "⚪ New"
 
 
-from src.core.i18n import get_lang, t
+from src.core.i18n import t
 
 
 def _build_story_intro_text(words: list[str], lang: str = "hy") -> str:
@@ -160,14 +161,16 @@ async def send_next_word_card(message: Message | CallbackQuery, user_id: int, le
     await cleanup_user_temp_messages(msg_target.bot, chat_id, user_id)
 
     daily_count = await get_daily_count(user_id)
-    if not is_unlimited_user(user_id) and daily_count >= DAILY_LIMIT:
+    lang = get_lang(user_id)
+    user_limit = await get_daily_limit(user_id)
+    if not is_unlimited_user(user_id) and daily_count >= user_limit:
         await msg_target.answer(
-            f"🎉 Այսօրվա {DAILY_LIMIT} բառը կատարեցիր։\n\n"
+            f"🎉 Այսօրվա {user_limit} բառը կատարեցիր։\n\n"
             f"Վաղը կշարունակենք 💪\n"
             f"📘 Սովորելու բառեր — /review\n"
             f"✅ Սովորած բառեր — /learned\n"
             f"📖 Պատմություն բառերով — /story",
-            reply_markup=get_story_genre_keyboard(),
+            reply_markup=get_story_genre_keyboard(lang),
         )
         return False
 
@@ -195,7 +198,8 @@ async def send_next_word_card(message: Message | CallbackQuery, user_id: int, le
 
     word_data = await get_word_data(word, level=level)
     reason = await get_word_reason(user_id, word)
-    daily_limit_display = DAILY_LIMIT if not is_unlimited_user(user_id) else max(DAILY_LIMIT, daily_count + 1)
+    user_limit = await get_daily_limit(user_id)
+    daily_limit_display = user_limit if not is_unlimited_user(user_id) else max(user_limit, daily_count + 1)
     text = format_word(word_data, daily_count + 1, daily_limit_display, level, reason)
     has_back = bool(user_word_history.get(user_id))
     lang = get_lang(user_id)
@@ -235,7 +239,8 @@ async def send_previous_word_card(message: Message | CallbackQuery, user_id: int
 
     # 3. Present previous word card
     daily_count = await get_daily_count(user_id)
-    daily_limit_display = DAILY_LIMIT if not is_unlimited_user(user_id) else max(DAILY_LIMIT, daily_count + 1)
+    user_limit = await get_daily_limit(user_id)
+    daily_limit_display = user_limit if not is_unlimited_user(user_id) else max(user_limit, daily_count + 1)
     word_data = await get_word_data(word, level=level)
     reason = await get_word_reason(user_id, word)
     text = format_word(word_data, daily_count, daily_limit_display, level, reason)
@@ -302,38 +307,36 @@ async def send_review_list(message: Message, user_id: int) -> bool:
 
     lines = [f"{i}. {w['word']}  [{_grade_tag(w.get('last_grade') or 'hard')}] ({format_date(w.get('added_at', ''))})" for i, w in enumerate(words, 1)]
 
-    guide = (
-        "💡 **Ինչպե՞ս գնահատել.**\n"
-        "❌ **Again**: Չհիշեցի (կրկնել շուտով)\n"
-        "🟠 **Hard**: Դժվարությամբ (1-2 օրից)\n"
-        "✅ **Good**: Լավ հիշում եմ (3-4 օրից)\n"
-        "🚀 **Easy**: Շատ հեշտ էր (7-10 օրից)\n"
-    )
-
     lines_text = "\n".join(lines)
+    header = t("review_list_header", lang)
+    guide = t("review_guide", lang)
+    press = t("review_press_start", lang)
     await message.answer(
-        f"📘 **Review բառերի ցանկ**\n\n"
+        f"{header}\n\n"
         f"{lines_text}\n\n"
         f"{guide}\n"
-        f"Սեղմեք «🔁 Կրկնել (Flashcards)»։",
-        reply_markup=get_review_start_keyboard(),
+        f"{press}",
+        reply_markup=get_review_start_keyboard(lang),
         parse_mode="Markdown"
     )
     return True
 
 
-def _build_review_flashcard_text(word: str, index: int, total: int, word_data: dict, *, show_translation: bool, show_example: bool) -> str:
+def _build_review_flashcard_text(word: str, index: int, total: int, word_data: dict, *, show_translation: bool, show_example: bool, lang: str = "hy") -> str:
     translation = (word_data.get("translation") or "—").strip()
     transcription = (word_data.get("transcription") or "—").strip()
     example = (word_data.get("example") or "—").strip()
     example_tr = (word_data.get("example_translation") or "—").strip()
     text = f"🃏 Flashcard [{index}/{total}]\n\n🔤 Word: {word}\n"
-    text += f"\n🇦🇲 Translation: {translation}\n🔊 Transcription: {transcription}" if show_translation else "\n💡 Սեղմեք «Show Translate»։"
+    show_tr_hint = {"hy": "💡 Սեղմեք «Show Translate»։", "ru": "💡 Нажмите «Show Translate».", "en": "💡 Click «Show Translate»."}.get(lang, "💡 Click «Show Translate».")
+    show_ex_hint = {"hy": "💡 Սեղմեք «Show Example»։", "ru": "💡 Нажмите «Show Example».", "en": "💡 Click «Show Example»."}.get(lang, "💡 Click «Show Example».")
+
+    text += f"\n🇦🇲 Translation: {translation}\n🔊 Transcription: {transcription}" if show_translation else f"\n{show_tr_hint}"
     has_example = example != "—" or example_tr != "—"
     if show_example and has_example:
-        text += f"\n\n💬 Example: {example}\n🇦🇲 Օրինակի թարգմանություն: {example_tr}"
+        text += f"\n\n💬 Example: {example}\n🇦🇲 Translation: {example_tr}"
     elif has_example:
-        text += "\n\n💡 Սեղմեք «Show Example»։"
+        text += f"\n\n{show_ex_hint}"
     return text
 
 
@@ -342,17 +345,19 @@ async def _edit_review_flashcard(message: Message, user_id: int) -> bool:
     if not session:
         return False
 
+    lang = get_lang(user_id)
     words, index0 = session.get("words", []), int(session.get("index", 0))
     if not words or index0 >= len(words):
         review_sessions.pop(user_id, None)
-        await safe_edit_text(message, "🎉 Գերազանց աշխատանք․ review-ը ավարտեցիր։")
+        done_text = {"hy": "🎉 Գերազանց աշխատանք․ review-ը ավարտեցիր։", "ru": "🎉 Отличная работа! Повторение завершено.", "en": "🎉 Great job! Review completed."}.get(lang, "🎉 Great job! Review completed.")
+        await safe_edit_text(message, done_text)
         return False
 
     word = words[index0]
     word_data = await get_word_data(word) # Review uses cached data mostly, or generic
     await safe_edit_text(
         message,
-        _build_review_flashcard_text(word, index0 + 1, len(words), word_data, show_translation=bool(session.get("show_translation")), show_example=bool(session.get("show_example"))),
-        reply_markup=get_review_flashcard_keyboard(word, show_translation=bool(session.get("show_translation")), show_example=bool(session.get("show_example"))),
+        _build_review_flashcard_text(word, index0 + 1, len(words), word_data, show_translation=bool(session.get("show_translation")), show_example=bool(session.get("show_example")), lang=lang),
+        reply_markup=get_review_flashcard_keyboard(word, show_translation=bool(session.get("show_translation")), show_example=bool(session.get("show_example")), lang=lang),
     )
     return True

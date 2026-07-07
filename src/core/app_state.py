@@ -13,6 +13,8 @@ practice_waiting_users: dict[int, str] = {} # user_id -> word being practiced
 pronunciation_waiting_users: dict[int, str] = {} # user_id -> word being practiced for pronunciation
 search_waiting_users: set[int] = set()  # users waiting for a search query
 pomodoro_sessions: dict[int, datetime] = {} # user_id -> start_time
+plan_custom_waiting_users: dict[int, bool] = {}  # user_id -> True when waiting for custom goal input
+level_test_sessions: dict[int, dict] = {} # user_id -> state
 
 last_presented_words: dict[int, str] = {}
 test_sessions: dict[int, dict] = {}
@@ -70,6 +72,8 @@ def clear_user_waiting_states(user_id: int):
     practice_waiting_users.pop(user_id, None)
     pronunciation_waiting_users.pop(user_id, None)
     search_waiting_users.discard(user_id)
+    plan_custom_waiting_users.pop(user_id, None)
+    level_test_sessions.pop(user_id, None)
 
 
 def get_user_lock(user_id: int) -> asyncio.Lock:

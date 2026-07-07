@@ -68,18 +68,23 @@ class User(Base):
     user_id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
     username: Mapped[str | None] = mapped_column(Text, nullable=True)
     joined_at: Mapped[str | None] = mapped_column(Text, nullable=True)
-    streak: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    streak: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default=text("0"))
     last_active: Mapped[str | None] = mapped_column(Text, nullable=True)
-    daily_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    daily_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default=text("0"))
     daily_date: Mapped[str | None] = mapped_column(Text, nullable=True)
     user_level: Mapped[str | None] = mapped_column(Text, nullable=True)
     language: Mapped[str | None] = mapped_column(Text, nullable=True, default='hy')
-    banned: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    banned: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default=text("0"))
     ban_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
-    placement_done: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
-    placement_score: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    placement_done: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default=text("0"))
+    placement_score: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default=text("0"))
     placement_taken_at: Mapped[str | None] = mapped_column(Text, nullable=True)
     study_plan: Mapped[str] = mapped_column(Text, default='steady')
+    daily_goal: Mapped[int] = mapped_column(Integer, nullable=False, default=5, server_default=text("5"))
+    daily_pomodoro_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default=text("0"))
+    daily_practice_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default=text("0"))
+    last_failed_test_date: Mapped[str | None] = mapped_column(Text, nullable=True)
+    last_failed_test_level: Mapped[str | None] = mapped_column(Text, nullable=True)
 
 
 class WordProgress(Base):
@@ -90,23 +95,23 @@ class WordProgress(Base):
         Index("idx_progress_review", "user_id", "next_review"),
     )
 
-    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    id: Mapped[int] = mapped_column(BigInteger().with_variant(Integer, "sqlite"), primary_key=True, autoincrement=True)
     user_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("users.user_id", ondelete="CASCADE"), nullable=False)
     word: Mapped[str] = mapped_column(Text, nullable=False)
-    level: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
-    seen: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
-    correct: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
-    correct_streak: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
-    wrong: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
-    learned: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
-    marked_hard: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
-    marked_know: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    level: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default=text("0"))
+    seen: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default=text("0"))
+    correct: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default=text("0"))
+    correct_streak: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default=text("0"))
+    wrong: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default=text("0"))
+    learned: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default=text("0"))
+    marked_hard: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default=text("0"))
+    marked_know: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default=text("0"))
     added_at: Mapped[str | None] = mapped_column(Text, nullable=True)
     learned_at: Mapped[str | None] = mapped_column(Text, nullable=True)
     next_review: Mapped[str | None] = mapped_column(Text, nullable=True)
-    ease_factor: Mapped[float] = mapped_column(Float, nullable=False, default=2.5)
-    interval_days: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
-    repetitions: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    ease_factor: Mapped[float] = mapped_column(Float, nullable=False, default=2.5, server_default=text("2.5"))
+    interval_days: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default=text("0"))
+    repetitions: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default=text("0"))
     last_reviewed_at: Mapped[str | None] = mapped_column(Text, nullable=True)
     last_grade: Mapped[str | None] = mapped_column(Text, nullable=True)
 
@@ -115,7 +120,7 @@ class Session(Base):
     __tablename__ = "sessions"
     __table_args__ = (Index("idx_sessions_user", "user_id"),)
 
-    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    id: Mapped[int] = mapped_column(BigInteger().with_variant(Integer, "sqlite"), primary_key=True, autoincrement=True)
     user_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("users.user_id", ondelete="CASCADE"), nullable=False)
     word: Mapped[str] = mapped_column(Text, nullable=False)
     answered_at: Mapped[str] = mapped_column(Text, nullable=False)
@@ -126,7 +131,7 @@ class StoryHistory(Base):
     __tablename__ = "story_history"
     __table_args__ = (Index("idx_story_user_date", "user_id", "story_date"),)
 
-    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    id: Mapped[int] = mapped_column(BigInteger().with_variant(Integer, "sqlite"), primary_key=True, autoincrement=True)
     user_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("users.user_id", ondelete="CASCADE"), nullable=False)
     story_date: Mapped[str] = mapped_column(Text, nullable=False)
     genre: Mapped[str] = mapped_column(Text, nullable=False)
@@ -139,7 +144,7 @@ class MemoryPalaceHistory(Base):
     __tablename__ = "memory_palace_history"
     __table_args__ = (Index("idx_palace_user_date", "user_id", "palace_date"),)
 
-    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    id: Mapped[int] = mapped_column(BigInteger().with_variant(Integer, "sqlite"), primary_key=True, autoincrement=True)
     user_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("users.user_id", ondelete="CASCADE"), nullable=False)
     palace_date: Mapped[str] = mapped_column(Text, nullable=False)
     theme: Mapped[str] = mapped_column(Text, nullable=False)
@@ -160,7 +165,7 @@ class AuditLog(Base):
     __tablename__ = "admin_audit_log" if _is_sqlite_dsn(DATABASE_URL) else "audit_log"
     __table_args__ = {"schema": None if _is_sqlite_dsn(DATABASE_URL) else "admin"}
 
-    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    id: Mapped[int] = mapped_column(BigInteger().with_variant(Integer, "sqlite"), primary_key=True, autoincrement=True)
     actor_user_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
     target_user_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     action: Mapped[str] = mapped_column(Text, nullable=False)
@@ -347,10 +352,22 @@ async def init_db():
 
         await asyncio.to_thread(run_upgrade)
 
-    # Ensure language column exists on existing database schema
+    # Ensure language, study_plan, daily_pomodoro_count, and daily_practice_count columns exist on existing database schema
     try:
         async with _db_connect() as db:
-            await db.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS language TEXT DEFAULT 'hy';"))
+            if _is_sqlite_dsn(DATABASE_URL):
+                for col, def_val in [("language", "'hy'"), ("study_plan", "'steady'"), ("daily_goal", "5"), ("daily_pomodoro_count", "0"), ("daily_practice_count", "0")]:
+                    try:
+                        sql_type = "TEXT" if col in ("language", "study_plan") else "INTEGER"
+                        await db.execute(text(f"ALTER TABLE users ADD COLUMN {col} {sql_type} DEFAULT {def_val};"))
+                    except Exception:
+                        pass
+            else:
+                await db.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS language TEXT DEFAULT 'hy';"))
+                await db.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS study_plan TEXT DEFAULT 'steady';"))
+                await db.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS daily_goal INTEGER DEFAULT 5;"))
+                await db.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS daily_pomodoro_count INTEGER DEFAULT 0;"))
+                await db.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS daily_practice_count INTEGER DEFAULT 0;"))
     except Exception:
         pass
 
@@ -447,11 +464,26 @@ async def update_streak(user_id: int):
         )
 
 
-async def set_user_plan(user_id: int, plan: str):
-    if plan not in {"steady", "deep"}:
+# Plan → default daily goal mapping
+PLAN_DEFAULT_GOALS = {"lite": 3, "steady": 5, "deep": 15}
+
+
+async def set_user_plan(user_id: int, plan: str, custom_goal: int | None = None):
+    """Set study plan. If custom_goal is provided it overrides the plan default."""
+    if plan not in {"lite", "steady", "deep", "custom"}:
         return
+    if plan == "custom":
+        goal = max(1, min(30, int(custom_goal or 5)))
+    else:
+        goal = PLAN_DEFAULT_GOALS.get(plan, 5)
+        if custom_goal is not None:
+            goal = max(1, min(30, int(custom_goal)))
     async with _db_connect() as db:
-        await db.execute(update(User).where(User.user_id == user_id).values(study_plan=plan))
+        await db.execute(
+            update(User)
+            .where(User.user_id == user_id)
+            .values(study_plan=plan, daily_goal=goal)
+        )
 
 
 async def get_user_plan(user_id: int) -> str:
@@ -459,6 +491,27 @@ async def get_user_plan(user_id: int) -> str:
         res = await db.execute(select(User.study_plan).where(User.user_id == user_id))
         row = res.first()
     return row[0] if row and row[0] else "steady"
+
+
+async def get_daily_limit(user_id: int) -> int:
+    """Return the user's personal daily word goal (falls back to 5)."""
+    from src.core.config import DAILY_LIMIT
+    async with _db_connect() as db:
+        res = await db.execute(select(User.daily_goal).where(User.user_id == user_id))
+        row = res.first()
+    val = row[0] if row and row[0] is not None else None
+    return int(val) if val and val > 0 else DAILY_LIMIT
+
+
+async def set_daily_goal(user_id: int, goal: int):
+    """Directly set a custom daily word goal (1–30) without changing the plan tier."""
+    goal = max(1, min(30, goal))
+    async with _db_connect() as db:
+        await db.execute(
+            update(User)
+            .where(User.user_id == user_id)
+            .values(daily_goal=goal, study_plan="custom")
+        )
 
 
 # ═══════════════════════════════════════════════════════
@@ -474,7 +527,11 @@ async def get_daily_count(user_id: int) -> int:
             return 0
         daily_count, daily_date = row[0], row[1]
         if daily_date != today:
-            await db.execute(update(User).where(User.user_id == user_id).values(daily_count=0, daily_date=today))
+            await db.execute(
+                update(User)
+                .where(User.user_id == user_id)
+                .values(daily_count=0, daily_pomodoro_count=0, daily_practice_count=0, daily_date=today)
+            )
             return 0
         return daily_count or 0
 
@@ -511,6 +568,68 @@ async def increment_daily(user_id: int, word: str | None = None):
             )
 
 
+async def get_daily_pomodoro_count(user_id: int) -> int:
+    today = datetime.now().date().isoformat()
+    async with _db_connect() as db:
+        res = await db.execute(select(User.daily_pomodoro_count, User.daily_date).where(User.user_id == user_id))
+        row = res.first()
+        if not row:
+            return 0
+        daily_count, daily_date = row[0], row[1]
+        if daily_date != today:
+            await db.execute(
+                update(User)
+                .where(User.user_id == user_id)
+                .values(daily_count=0, daily_pomodoro_count=0, daily_practice_count=0, daily_date=today)
+            )
+            return 0
+        return daily_count or 0
+
+
+async def increment_daily_pomodoro(user_id: int):
+    today = datetime.now().date().isoformat()
+    async with _db_connect() as db:
+        await db.execute(
+            update(User)
+            .where(User.user_id == user_id)
+            .values(
+                daily_pomodoro_count=case((User.daily_date == today, User.daily_pomodoro_count + 1), else_=1),
+                daily_date=today,
+            )
+        )
+
+
+async def get_daily_practice_count(user_id: int) -> int:
+    today = datetime.now().date().isoformat()
+    async with _db_connect() as db:
+        res = await db.execute(select(User.daily_practice_count, User.daily_date).where(User.user_id == user_id))
+        row = res.first()
+        if not row:
+            return 0
+        daily_count, daily_date = row[0], row[1]
+        if daily_date != today:
+            await db.execute(
+                update(User)
+                .where(User.user_id == user_id)
+                .values(daily_count=0, daily_pomodoro_count=0, daily_practice_count=0, daily_date=today)
+            )
+            return 0
+        return daily_count or 0
+
+
+async def increment_daily_practice(user_id: int):
+    today = datetime.now().date().isoformat()
+    async with _db_connect() as db:
+        await db.execute(
+            update(User)
+            .where(User.user_id == user_id)
+            .values(
+                daily_practice_count=case((User.daily_date == today, User.daily_practice_count + 1), else_=1),
+                daily_date=today,
+            )
+        )
+
+
 # ═══════════════════════════════════════════════════════
 # USER LEVEL
 # ═══════════════════════════════════════════════════════
@@ -526,9 +645,35 @@ async def set_user_level(user_id: int, level: str):
 async def get_user_level(user_id: int) -> str:
     async with _db_connect() as db:
         res = await db.execute(select(User.user_level).where(User.user_id == user_id))
+        return res.scalar() or "A1"
+
+
+async def record_failed_level_test(user_id: int, target_level: str):
+    async with _db_connect() as db:
+        today = datetime.now().strftime("%Y-%m-%d")
+        await db.execute(
+            update(User).where(User.user_id == user_id).values(
+                last_failed_test_date=today,
+                last_failed_test_level=target_level
+            )
+        )
+        await db.commit()
+
+
+async def can_take_level_test(user_id: int, target_level: str) -> bool:
+    async with _db_connect() as db:
+        res = await db.execute(
+            select(User.last_failed_test_date, User.last_failed_test_level)
+            .where(User.user_id == user_id)
+        )
         row = res.first()
-    lvl = row[0] if row else None
-    return lvl or "A1"
+        if not row:
+            return True
+        today = datetime.now().strftime("%Y-%m-%d")
+        last_date, last_level = row[0], row[1]
+        if last_date == today and last_level == target_level:
+            return False
+        return True
 
 
 async def is_placement_done(user_id: int) -> bool:
@@ -1177,6 +1322,32 @@ async def reset_progress(user_id: int, *, preserve_history: bool = True):
             daily_count=0, daily_date=NULL WHERE user_id=?
             """,
             (user_id,),
+        )
+        await db.commit()
+
+
+async def reset_user_completely(user_id: int):
+    async with _db_connect() as db:
+        await db.execute(delete(WordProgress).where(WordProgress.user_id == user_id))
+        await db.execute(delete(Session).where(Session.user_id == user_id))
+        await db.execute(delete(StoryHistory).where(StoryHistory.user_id == user_id))
+        await db.execute(delete(MemoryPalaceHistory).where(MemoryPalaceHistory.user_id == user_id))
+        await db.execute(
+            update(User)
+            .where(User.user_id == user_id)
+            .values(
+                streak=0,
+                last_active=None,
+                daily_count=0,
+                daily_date=None,
+                placement_done=0,
+                placement_score=0,
+                placement_taken_at=None,
+                study_plan="steady",
+                daily_pomodoro_count=0,
+                daily_practice_count=0,
+                language="hy"
+            )
         )
         await db.commit()
 

@@ -15,6 +15,7 @@ from src.database.models import (
     get_top_leaderboard,
     get_user_daily_stats,
     get_user_full_profile,
+    reset_user_completely,
     set_user_ban,
 )
 from src.utils.utils import parse_positive_int_arg, safe_edit_text
@@ -177,6 +178,7 @@ async def admin_ui_handler(callback: CallbackQuery):
         return
 
     action = callback.data.split(":")[1]
+    user_id = callback.from_user.id
 
     if action == "overview":
         stats = await get_admin_overview()
@@ -268,6 +270,15 @@ async def admin_ui_handler(callback: CallbackQuery):
         )
         await safe_edit_text(callback.message, text, reply_markup=get_admin_keyboard())
         await callback.answer()
+
+    elif action == "reset_self":
+        await reset_user_completely(user_id)
+        await safe_edit_text(
+            callback.message,
+            "♻️ **Ձեր օգտահաշիվը ամբողջությամբ զրոյացվել է:**\n\nԲոլոր տվյալները, մակարդակը և առաջընթացը ջնջվել են։ Նորից սկսելու համար ուղարկեք /start հրամանը։",
+            parse_mode="Markdown"
+        )
+        await callback.answer("Account reset completed", show_alert=True)
 
     elif action == "refresh":
         await safe_edit_text(callback.message, "🛠 Admin Panel", reply_markup=get_admin_keyboard())

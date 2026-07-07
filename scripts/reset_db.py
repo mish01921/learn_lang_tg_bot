@@ -5,7 +5,7 @@ import sys
 # Add project root to path
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'src'))) # Adjust path for src module
 
-from src.database.models import full_reset, init_db_pool, close_db_pool
+from src.database.models import close_db_pool, full_reset, init_db_pool
 
 
 async def main():

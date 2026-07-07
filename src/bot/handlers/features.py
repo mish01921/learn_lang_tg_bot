@@ -124,7 +124,7 @@ async def story_handler(message: Message):
     if not is_unlimited and len(words) < 3:
         await message.answer(t("story_need_words", lang))
         return
-    await message.answer(_build_story_intro_text(words, lang=lang), reply_markup=get_story_genre_keyboard())
+    await message.answer(_build_story_intro_text(words, lang=lang), reply_markup=get_story_genre_keyboard(lang))
 
 @router.callback_query(F.data.startswith("story:genre:"))
 async def story_callback_handler(callback: CallbackQuery):
@@ -165,7 +165,7 @@ async def palace_handler(message: Message):
     if not is_unlimited and len(words) < 3:
         await message.answer(t("palace_need_words", lang))
         return
-    await message.answer(_build_palace_intro_text(words, lang=lang), reply_markup=get_palace_theme_keyboard())
+    await message.answer(_build_palace_intro_text(words, lang=lang), reply_markup=get_palace_theme_keyboard(lang))
 
 @router.callback_query(F.data.startswith("palace:theme:"))
 async def palace_callback_handler(callback: CallbackQuery):

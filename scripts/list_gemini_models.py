@@ -1,10 +1,12 @@
 import asyncio
-import aiohttp
-import sys
 import os
+import sys
+
+import aiohttp
 
 sys.path.append(os.getcwd())
 from src.core.config import GEMINI_API_KEY
+
 
 async def list_models():
     if not GEMINI_API_KEY:

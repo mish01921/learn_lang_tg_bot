@@ -6,9 +6,19 @@ def format_word(word_data: dict, current: int, total: int, level: str, coach_hin
     example_tr = word_data.get("example_translation", "—") or "—"
     audio_url = word_data.get("audio_url", "") or ""
     audio_line = f"🔊 Pronunciation audio: {audio_url}\n" if audio_url else ""
+
+    # Build visual daily progress bar
+    tot = max(1, total)
+    pct = min(100, int((current / tot) * 100))
+    bars = 10
+    filled = min(bars, max(0, round((pct / 100) * bars)))
+    bar_str = "🟢" * filled + "⚪" * (bars - filled)
+    progress_line = f"📊 Progress: {bar_str} `{current}/{total}` ({pct}%)\n"
+
     base = (
         f"🏷️ Level: {level}\n"
-        f"📖 Word: {word_data['word']}   [{current}/{total}]\n"
+        f"📖 Word: {word_data['word']}\n"
+        f"{progress_line}"
         f"🧠 Coach: {coach_hint or 'Պլանային առաջընթաց'}\n"
         f"🔊 Transcription: {word_data['transcription']}\n"
         f"{audio_line}"

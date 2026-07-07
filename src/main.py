@@ -8,7 +8,7 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")
 
 from aiogram import Bot, Dispatcher
 
-from src.bot.handlers import admin, features, general, placement, study
+from src.bot.handlers import admin, features, general, placement, study, level_test
 from src.core.config import TOKEN
 from src.core.texts import BOT_DESCRIPTION, BOT_SHORT_DESCRIPTION
 from src.data.api_words import (
@@ -75,6 +75,7 @@ async def main():
 
     # Register all routers
     dp.include_router(placement.router)
+    dp.include_router(level_test.router)
     dp.include_router(admin.router)
     dp.include_router(general.router)
     dp.include_router(study.router)

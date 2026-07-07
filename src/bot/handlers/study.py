@@ -13,16 +13,17 @@ from src.bot.ui import (
     get_test_options_keyboard,
 )
 from src.core.app_state import (
+    clear_user_waiting_states,
+    get_user_lock,
     pomodoro_sessions,
     practice_waiting_users,
     processed_callbacks,
     pronunciation_waiting_users,
+    record_temp_message,
+    record_word_action,
     register_processed_callback,
     review_sessions,
     test_sessions,
-    record_temp_message,
-    record_word_action,
-    get_user_lock,
 )
 from src.core.i18n import get_lang, t
 from src.data.api_words import (
@@ -35,6 +36,8 @@ from src.database.models import (
     get_seen_words,
     get_user_level,
     increment_daily,
+    increment_daily_pomodoro,
+    increment_daily_practice,
     is_placement_done,
     record_answer,
 )
@@ -48,11 +51,9 @@ from src.utils.bot_helpers import (
     send_review_list,
 )
 from src.utils.utils import (
-    is_unlimited_user,
     reject_if_banned_callback,
     reject_if_banned_message,
     safe_edit_text,
-    touch_user_from_callback,
     touch_user_from_message,
 )
 
@@ -123,9 +124,11 @@ async def send_word_handler(message: Message):
 
 @router.callback_query(F.data.startswith("word:"))
 async def word_callback_handler(callback: CallbackQuery):
+    import logging; logging.info(f"Callback received: {callback.data} from user {callback.from_user.id}")
     if await reject_if_banned_callback(callback):
         return
     user_id = callback.from_user.id
+    lang = get_lang(user_id)
 
     if callback.id in processed_callbacks:
         await callback.answer()
@@ -150,31 +153,33 @@ async def word_callback_handler(callback: CallbackQuery):
             await send_next_word_card(callback.message, user_id, await maybe_promote_level(user_id))
 
         elif action == "next":
-            await callback.answer("Բացում եմ հաջորդ բառը 🚀")
+            await callback.answer(t("toast_next_word", lang))
             await send_next_word_card(callback.message, user_id, await maybe_promote_level(user_id))
 
         elif action == "back":
-            await callback.answer("Վերադառնում ենք նախորդ բառին ⬅️")
+            await callback.answer(t("toast_prev_word", lang))
             await send_previous_word_card(callback.message, user_id)
 
         elif action == "practice":
             word = parts[2]
+            clear_user_waiting_states(user_id)
             practice_waiting_users[user_id] = word
+            logging.info(f"Set practice_waiting_users for user {user_id} to word '{word}'")
             sent = await callback.message.answer(
-                f"🧠 **Ինտերակտիվ Պրակտիկա՝ «{word}»**\n\n"
-                f"✍️ Գրիր **ցանկացած անգլերեն նախադասություն** կամ նույնիսկ կարճ միտք, որտեղ օգտագործում ես **{word}** բառը։\n\n"
-                "🤖 *Իմ AI ուսուցիչը՝*\n"
-                "1️⃣ Կստուգի քո քերականությունը և բառի ճիշտ կիրառությունը\n"
-                "2️⃣ Կառաջարկի ավելի բնական ու գրագետ տարբերակներ\n"
-                "3️⃣ Կտա կարևոր խորհուրդներ և նրբություններ"
+                t("practice_intro", lang, word=word),
+                parse_mode="Markdown"
             )
             record_temp_message(user_id, sent.message_id)
             await callback.answer()
 
         elif action == "pronounce":
             word = parts[2]
+            clear_user_waiting_states(user_id)
             pronunciation_waiting_users[user_id] = word
-            sent = await callback.message.answer(f"🎙️ **Pronunciation Task:**\nԽնդրում եմ արտասանել «**{word}**» բառը ձայնային հաղորդագրությամբ (Voice)։\nԵս կվերլուծեմ քո արտասանությունը ELSA-ի նման։")
+            sent = await callback.message.answer(
+                t("pronounce_intro", lang, word=word),
+                parse_mode="Markdown"
+            )
             record_temp_message(user_id, sent.message_id)
             await callback.answer()
 
@@ -188,22 +193,28 @@ async def pomodoro_command_handler(message: Message):
     lang = get_lang(user_id)
 
     if user_id in pomodoro_sessions:
-        # Show existing session instead of start screen
         elapsed = datetime.now() - pomodoro_sessions[user_id]
         remaining_seconds = max(0, int(25 * 60 - elapsed.total_seconds()))
 
         if remaining_seconds > 0:
             mins, secs = divmod(remaining_seconds, 60)
             time_str = f"{mins:02d}:{secs:02d}"
+
+            total_seconds = 25 * 60
+            progress_pct = int((elapsed.total_seconds() / total_seconds) * 100)
+            bar_len = 10
+            filled_len = int(bar_len * progress_pct / 100)
+            bar = "■" * filled_len + "□" * (bar_len - filled_len)
+
             await message.answer(
-                t("pomo_active", lang, time_str=time_str),
-                reply_markup=get_pomodoro_keyboard(is_active=True)
+                t("pomo_active_progress", lang, time_str=time_str, bar=bar, pct=progress_pct),
+                reply_markup=get_pomodoro_keyboard(is_active=True, lang=lang)
             )
             return
 
     await message.answer(
         t("pomo_intro", lang),
-        reply_markup=get_pomodoro_keyboard()
+        reply_markup=get_pomodoro_keyboard(lang=lang)
     )
 
 
@@ -216,30 +227,73 @@ async def pomodoro_callback_handler(callback: CallbackQuery):
     if action == "start":
         start_time = datetime.now()
         pomodoro_sessions[user_id] = start_time
+
+        # Calculate initial progress bar
+        bar = "□" * 10
         await safe_edit_text(
             callback.message,
-            t("pomo_started", lang),
-            reply_markup=get_pomodoro_keyboard(is_active=True)
+            t("pomo_active_progress", lang, time_str="25:00", bar=bar, pct=0),
+            reply_markup=get_pomodoro_keyboard(is_active=True, lang=lang)
         )
         await callback.answer()
 
         async def alert_after_focus():
-            await asyncio.sleep(25 * 60)
+            total_seconds = 25 * 60
+            update_interval = 5
+            steps = total_seconds // update_interval
+            chat_id = callback.message.chat.id
+            message_id = callback.message.message_id
+
+            for _ in range(steps):
+                await asyncio.sleep(update_interval)
+
+                # Check if session was stopped or restarted
+                if user_id not in pomodoro_sessions or pomodoro_sessions[user_id] != start_time:
+                    return
+
+                elapsed = datetime.now() - start_time
+                remaining = int(total_seconds - elapsed.total_seconds())
+                if remaining <= 0:
+                    break
+
+                # Calculate progress bar
+                progress_pct = int((elapsed.total_seconds() / total_seconds) * 100)
+                bar_len = 10
+                filled_len = int(bar_len * progress_pct / 100)
+                bar = "■" * filled_len + "□" * (bar_len - filled_len)
+
+                mins, secs = divmod(remaining, 60)
+                time_str = f"{mins:02d}:{secs:02d}"
+
+                try:
+                    await callback.bot.edit_message_text(
+                        chat_id=chat_id,
+                        message_id=message_id,
+                        text=t("pomo_active_progress", lang, time_str=time_str, bar=bar, pct=progress_pct),
+                        reply_markup=get_pomodoro_keyboard(is_active=True, lang=lang)
+                    )
+                except Exception:
+                    pass
+
             if user_id in pomodoro_sessions and pomodoro_sessions[user_id] == start_time:
                 try:
+                    await increment_daily_pomodoro(user_id)
                     await callback.bot.send_message(
                         user_id,
                         t("pomo_finished", lang),
-                        reply_markup=get_pomodoro_keyboard(is_active=False)
+                        reply_markup=get_pomodoro_keyboard(is_active=False, lang=lang),
+                        disable_notification=False
                     )
-                    del pomodoro_sessions[user_id]
                 except Exception:
                     pass
+                finally:
+                    pomodoro_sessions.pop(user_id, None)
+
         asyncio.create_task(alert_after_focus())
 
     elif action == "refresh":
         if user_id not in pomodoro_sessions:
-            await safe_edit_text(callback.message, t("pomo_not_active", lang), reply_markup=get_pomodoro_keyboard())
+            await safe_edit_text(callback.message, t("pomo_not_active", lang), reply_markup=get_pomodoro_keyboard(lang=lang))
             await callback.answer()
             return
 
@@ -253,25 +307,33 @@ async def pomodoro_callback_handler(callback: CallbackQuery):
         mins, secs = divmod(remaining_seconds, 60)
         time_str = f"{mins:02d}:{secs:02d}"
 
+        total_seconds = 25 * 60
+        progress_pct = int((elapsed.total_seconds() / total_seconds) * 100)
+        bar_len = 10
+        filled_len = int(bar_len * progress_pct / 100)
+        bar = "■" * filled_len + "□" * (bar_len - filled_len)
+
         await safe_edit_text(
             callback.message,
-            t("pomo_active", lang, time_str=time_str),
-            reply_markup=get_pomodoro_keyboard(is_active=True)
+            t("pomo_active_progress", lang, time_str=time_str, bar=bar, pct=progress_pct),
+            reply_markup=get_pomodoro_keyboard(is_active=True, lang=lang)
         )
         await callback.answer(f"{time_str}")
 
     elif action == "stop":
         if user_id in pomodoro_sessions:
             del pomodoro_sessions[user_id]
-        await safe_edit_text(callback.message, t("pomo_stopped", lang), reply_markup=get_pomodoro_keyboard())
+        await safe_edit_text(callback.message, t("pomo_stopped", lang), reply_markup=get_pomodoro_keyboard(lang=lang))
         await callback.answer()
 
 
-@router.message(F.text, lambda m: m.from_user.id in practice_waiting_users)
+@router.message(F.text & ~F.text.startswith('/') & F.from_user.id.func(lambda uid: uid in practice_waiting_users))
 async def practice_message_handler(message: Message):
+    import logging; logging.info(f"Practice message handler triggered for user {message.from_user.id}")
     user_id = message.from_user.id
-    word = practice_waiting_users[user_id]
-    del practice_waiting_users[user_id]
+    word = practice_waiting_users.pop(user_id, None)
+    if not word:
+        return
     record_temp_message(user_id, message.message_id)
 
     lang = get_lang(user_id)
@@ -279,7 +341,9 @@ async def practice_message_handler(message: Message):
     record_temp_message(user_id, msg.message_id)
 
     level = await get_user_level(user_id)
-    response = await get_practice_analysis_gemini(word, message.text, level=level, lang=lang)
+    response = await get_practice_analysis_gemini(word, message.text or "", level=level, lang=lang)
+    # Increment daily practice count in database
+    await increment_daily_practice(user_id)
     header = t("practice_header", lang, word=word)
     try:
         await msg.edit_text(f"{header}\n\n{response}", parse_mode="Markdown")
@@ -411,36 +475,32 @@ async def test_answer_handler(callback: CallbackQuery):
         await safe_edit_text(callback.message, text, reply_markup=kb)
 
 
-@router.message(F.voice, lambda m: m.from_user.id in pronunciation_waiting_users)
+@router.message(F.voice & F.from_user.id.func(lambda uid: uid in pronunciation_waiting_users))
 async def pronunciation_voice_handler(message: Message):
     user_id = message.from_user.id
-    word = pronunciation_waiting_users[user_id]
-    del pronunciation_waiting_users[user_id]
+    word = pronunciation_waiting_users.pop(user_id, None)
+    if word:
+        await verify_pronunciation_with_ai(message.bot, message, word)
 
-    await verify_pronunciation_with_ai(message.bot, message, word)
 
-
-@router.message(F.audio, lambda m: m.from_user.id in pronunciation_waiting_users)
+@router.message(F.audio & F.from_user.id.func(lambda uid: uid in pronunciation_waiting_users))
 async def pronunciation_audio_handler(message: Message):
     user_id = message.from_user.id
-    word = pronunciation_waiting_users[user_id]
-    del pronunciation_waiting_users[user_id]
-
-    await verify_pronunciation_with_ai(message.bot, message, word)
+    word = pronunciation_waiting_users.pop(user_id, None)
+    if word:
+        await verify_pronunciation_with_ai(message.bot, message, word)
 
 
 @router.message(
-    F.document,
-    lambda m: m.from_user.id in pronunciation_waiting_users
-    and m.document is not None
-    and (m.document.mime_type or "").startswith("audio/"),
+    F.document
+    & F.from_user.id.func(lambda uid: uid in pronunciation_waiting_users)
+    & F.document.mime_type.startswith("audio/")
 )
 async def pronunciation_document_handler(message: Message):
     user_id = message.from_user.id
-    word = pronunciation_waiting_users[user_id]
-    del pronunciation_waiting_users[user_id]
-
-    await verify_pronunciation_with_ai(message.bot, message, word)
+    word = pronunciation_waiting_users.pop(user_id, None)
+    if word:
+        await verify_pronunciation_with_ai(message.bot, message, word)
 
 
 @router.callback_query(F.data.startswith("audio:"))

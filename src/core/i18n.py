@@ -156,9 +156,14 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
 
     # ── Main menu buttons ──────────────────────────────────────────────────
     "btn_roadmap": {
-        "hy": "🗺 Ճանապարհային քարտեզ",
-        "ru": "🗺 Маршрут",
+        "hy": "🗺 Ճանապարհ",
+        "ru": "🗺 Прогресс",
         "en": "🗺 Roadmap",
+    },
+    "btn_daily_plan": {
+        "hy": "🎯 Օրվա Պլան",
+        "ru": "🎯 План на день",
+        "en": "🎯 Daily Plan",
     },
     "btn_coach": {
         "hy": "👨‍🏫 Մարզիչ",
@@ -240,19 +245,19 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
 
     # ── Word keyboard buttons ──────────────────────────────────────────────
     "btn_listen_us": {
-        "hy": "🇺🇸 Լսել (US)",
-        "ru": "🇺🇸 Слушать (US)",
-        "en": "🇺🇸 Listen (US)",
+        "hy": "🔊 US",
+        "ru": "🔊 US",
+        "en": "🔊 US",
     },
     "btn_listen_uk": {
-        "hy": "🇬🇧 Լսել (UK)",
-        "ru": "🇬🇧 Слушать (UK)",
-        "en": "🇬🇧 Listen (UK)",
+        "hy": "🔊 UK",
+        "ru": "🔊 UK",
+        "en": "🔊 UK",
     },
     "btn_test_voice": {
-        "hy": "🎙️ Ստուգել արտասանությունը",
-        "ru": "🎙️ Проверить голос",
-        "en": "🎙️ Test my Voice",
+        "hy": "🎙️ Ձայն",
+        "ru": "🎙️ Голос",
+        "en": "🎙️ Voice",
     },
     "btn_again": {
         "hy": "❌ Կրկնել",
@@ -275,8 +280,8 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "en": "🚀 Easy",
     },
     "btn_practice": {
-        "hy": "🧠 Կիրառել (Practice)",
-        "ru": "🧠 Практиковать",
+        "hy": "🧠 Կիրառել",
+        "ru": "🧠 Практика",
         "en": "🧠 Practice",
     },
     "btn_next_word": {
@@ -296,8 +301,33 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "ru": "📝 Начать тест уровня",
         "en": "📝 Start Placement Test",
     },
+    "btn_start_level_test": {
+        "hy": "📝 Սկսել Մակարդակի Թեստը",
+        "ru": "📝 Начать тест уровня",
+        "en": "📝 Start Level Test",
+    },
+    "level_test_intro": {
+        "hy": "Դուք պատրաստվում եք անցնել նոր մակարդակ **{level}**:\nԴրա համար պետք է հանձնել թեստ:\nՊատասխանեք {total} հարցերից առնվազն {passing}-ին ճիշտ:\nԵթե ձախողեք, կկարողանաք կրկին փորձել վաղը:",
+        "ru": "Вы собираетесь перейти на новый уровень **{level}**:\nДля этого необходимо пройти тест.\nОтветьте правильно как минимум на {passing} из {total} вопросов.\nЕсли не пройдете, сможете попробовать снова завтра.",
+        "en": "You are about to move to a new level **{level}**:\nTo do so, you must pass a test.\nAnswer at least {passing} out of {total} questions correctly.\nIf you fail, you can try again tomorrow.",
+    },
+    "level_test_failed_today": {
+        "hy": "❗ Դուք արդեն ձախողել եք **{level}** մակարդակի թեստը այսօր: Խնդրում ենք փորձել վաղը:",
+        "ru": "❗ Вы уже не сдали тест на уровень **{level}** сегодня. Пожалуйста, попробуйте завтра.",
+        "en": "❗ You already failed the **{level}** level test today. Please try again tomorrow.",
+    },
+    "level_test_passed": {
+        "hy": "🎉 Շնորհավորում ենք: Դուք բարեհաջող հանձնեցիք թեստը և անցաք **{level}** մակարդակ:\nՃիշտ պատասխաններ՝ {score}/{total}",
+        "ru": "🎉 Поздравляем! Вы успешно сдали тест и перешли на уровень **{level}**:\nПравильных ответов: {score}/{total}",
+        "en": "🎉 Congratulations! You passed the test and moved to level **{level}**:\nCorrect answers: {score}/{total}",
+    },
+    "level_test_failed": {
+        "hy": "😔 Ցավոք, դուք չհանձնեցիք թեստը:\nՃիշտ պատասխաններ՝ {score}/{total} (անհրաժեշտ էր {passing}):\nԽնդրում ենք շարունակել պարապել և փորձել վաղը:",
+        "ru": "😔 К сожалению, вы не сдали тест.\nПравильных ответов: {score}/{total} (нужно {passing}).\nПродолжайте заниматься и попробуйте завтра.",
+        "en": "😔 Unfortunately, you failed the test.\nCorrect answers: {score}/{total} (needed {passing}).\nPlease keep practicing and try again tomorrow.",
+    },
 
-    # ── Review buttons ─────────────────────────────────────────────────────
+    # ── Review buttons & guide ─────────────────────────────────────────────
     "btn_review_start": {
         "hy": "🔁 Կրկնել (Flashcards)",
         "ru": "🔁 Повторить (Flashcards)",
@@ -317,6 +347,38 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "hy": "⏭️ Անցնել",
         "ru": "⏭️ Пропустить",
         "en": "⏭️ Skip",
+    },
+    "review_list_header": {
+        "hy": "📘 **Review բառերի ցանկ**",
+        "ru": "📘 **Список слов для повторения**",
+        "en": "📘 **Review word list**",
+    },
+    "review_guide": {
+        "hy": "💡 **Ինչպե՞ս գնահատել.**\n❌ **Again**: Չհիշեցի (կրկնել շուտով)\n🟠 **Hard**: Դժվարությամբ (1-2 օրից)\n✅ **Good**: Լավ հիշում եմ (3-4 օրից)\n🚀 **Easy**: Շատ հեշտ էր (7-10 օրից)",
+        "ru": "💡 **Как оценивать:**\n❌ **Again**: Не вспомнил (повторить вскоре)\n🟠 **Hard**: С трудом (через 1-2 дня)\n✅ **Good**: Хорошо помню (через 3-4 дня)\n🚀 **Easy**: Очень легко (через 7-10 дней)",
+        "en": "💡 **How to grade:**\n❌ **Again**: Couldn't recall (repeat soon)\n🟠 **Hard**: With difficulty (in 1-2 days)\n✅ **Good**: Remember well (in 3-4 days)\n🚀 **Easy**: Very easy (in 7-10 days)",
+    },
+    "review_press_start": {
+        "hy": "Սեղմեք «🔁 Կրկնել (Flashcards)»։",
+        "ru": "Нажмите «🔁 Повторить (Flashcards)».",
+        "en": "Click «🔁 Review (Flashcards)».",
+    },
+
+    # ── Coach buttons ──────────────────────────────────────────────────────
+    "btn_coach_refresh": {
+        "hy": "🔄 Թարմացնել",
+        "ru": "🔄 Обновить",
+        "en": "🔄 Refresh",
+    },
+    "btn_coach_review": {
+        "hy": "📘 Review հիմա",
+        "ru": "📘 Повторить сейчас",
+        "en": "📘 Review now",
+    },
+    "btn_coach_stats": {
+        "hy": "📊 Մանրամասն վիճակագրություն",
+        "ru": "📊 Подробная статистика",
+        "en": "📊 Detailed statistics",
     },
 
     # ── Stats messages ─────────────────────────────────────────────────────
@@ -530,6 +592,26 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "ru": "🎙️ Анализ произношения: {word}",
         "en": "🎙️ Pronunciation Analysis: {word}",
     },
+    "practice_intro": {
+        "hy": "🧠 **Ինտերակտիվ Պրակտիկա՝ «{word}»**\n\n✍️ Գրիր **ցանկացած անգլերեն նախադասություն** կամ նույնիսկ կարճ միտք, որտեղ օգտագործում ես **{word}** բառը։\n\n🤖 *Իմ AI ուսուցիչը՝*\n1️⃣ Կստուգի քո քերականությունը և բառի ճիշտ կիրառությունը\n2️⃣ Կառաջարկի ավելի բնական ու գրագետ տարբերակներ\n3️⃣ Կտա կարևոր խորհուրդներ և նրբություններ",
+        "ru": "🧠 **Интерактивная практика: «{word}»**\n\n✍️ Напиши **любое английское предложение** или короткую мысль с использованием слова **{word}**.\n\n🤖 *Мой AI-учитель:*\n1️⃣ Проверит грамматику и правильность использования слова\n2️⃣ Предложит более естественные варианты\n3️⃣ Даст полезные советы и нюансы",
+        "en": "🧠 **Interactive Practice: «{word}»**\n\n✍️ Write **any English sentence** or short phrase using the word **{word}**.\n\n🤖 *My AI Tutor:*\n1️⃣ Will check your grammar and correct usage\n2️⃣ Will suggest more natural & native alternatives\n3️⃣ Will provide valuable tips and nuances",
+    },
+    "pronounce_intro": {
+        "hy": "🎙️ **Արտասանության Առաջադրանք՝ «{word}»**\n\nԽնդրում եմ արտասանել «**{word}**» բառը ձայնային հաղորդագրությամբ (Voice)։\nԵս կվերլուծեմ քո արտասանությունը ELSA-ի նման։",
+        "ru": "🎙️ **Задание по произношению: «{word}»**\n\nПожалуйста, произнесите слово «**{word}**» голосовым сообщением (Voice).\nЯ проанализирую ваше произношение как ELSA.",
+        "en": "🎙️ **Pronunciation Task: «{word}»**\n\nPlease pronounce the word «**{word}**» using a voice message.\nI will analyze your pronunciation like ELSA.",
+    },
+    "toast_next_word": {
+        "hy": "Բացում եմ հաջորդ բառը 🚀",
+        "ru": "Открываю следующее слово 🚀",
+        "en": "Opening next word 🚀",
+    },
+    "toast_prev_word": {
+        "hy": "Վերադառնում ենք նախորդ բառին ⬅️",
+        "ru": "Возвращаемся к предыдущему слову ⬅️",
+        "en": "Returning to previous word ⬅️",
+    },
     "practice_analyzing": {
         "hy": "🧐 **Վերլուծում եմ քո նախադասությունը «{word}» բառով...**\n⏳ *Խնդրում եմ սպասել մի քանի վայրկյան*",
         "ru": "🧐 **Анализирую твоё предложение со словом «{word}»...**\n⏳ *Пожалуйста, подождите несколько секунд*",
@@ -547,52 +629,98 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "ru": "📊 **Учебная Статистика**",
         "en": "📊 **Learning Dashboard**",
     },
-    "stats_progress": {
-        "hy": "🏆 Առաջընթաց",
-        "ru": "🏆 Прогресс",
-        "en": "🏆 Progress",
-    },
-    "stats_learned": {
-        "hy": "✅ Սովորած",
-        "ru": "✅ Изучено",
-        "en": "✅ Learned",
-    },
-    "stats_accuracy": {
-        "hy": "🎯 Ճշտություն",
-        "ru": "🎯 Точность",
-        "en": "🎯 Accuracy",
-    },
-    "stats_streak": {
-        "hy": "🔥 Ստրիկ (օրեր)",
-        "ru": "🔥 Стрик (дней)",
-        "en": "🔥 Streak (days)",
-    },
-    "stats_today": {
-        "hy": "📅 Այսօր",
-        "ru": "📅 Сегодня",
-        "en": "📅 Today",
-    },
-    "stats_review_queue": {
-        "hy": "📘 Կրկնության սպասող բառեր",
-        "ru": "📘 Очередь на повторение",
-        "en": "📘 Review queue",
-    },
 
     # ── Roadmap & Plan ─────────────────────────────────────────────────────
     "plan_choose": {
-        "hy": "🎓 **Ընտրիր քո ուսումնական պլանը:**\n\n**🐢 Steady Learner:** Օրական 5 նոր բառ + Կրկնություն + Պատմություն։\n**🔥 Deep Focus:** Օրական 10 նոր բառ + Pomodoro + Գործնական նախադասություններ + AI Tutor։",
-        "ru": "🎓 **Выберите учебный план:**\n\n**🐢 Steady Learner:** 5 новых слов в день + Повторение + История.\n**🔥 Deep Focus:** 10 новых слов в день + Pomodoro + Практические предложения + AI Tutor.",
-        "en": "🎓 **Choose your study plan:**\n\n**🐢 Steady Learner:** 5 new words/day + Review + Story.\n**🔥 Deep Focus:** 10 new words/day + Pomodoro + Practice sentences + AI Tutor.",
+        "hy": (
+            "🎓 **Ընտրիր քո ուսումնական պլանը:**\n\n"
+            "🌱 **Lite (3/օր):** Արագ լոկ, հարմար ծանր ու կտրուկ օրերի համար\n"
+            "🐢 **Steady (5/օր):** Բնական ռիթմ (default)\n"
+            "🔥 **Deep (15/օր):** Ինտենսիվ + AI Tutor + Pomodoro\n"
+            "⚙️ **Custom:** Ինքդ ֆիքսիր 1-30 բառ/օր\n\n"
+            "↕️ Ներքև ընտրիր թե ինչ պլան կուզես:"
+        ),
+        "ru": (
+            "🎓 **Выберите учебный план:**\n\n"
+            "🌱 **Lite (3/день):** Лёгкий темп для занятых дней\n"
+            "🐢 **Steady (5/день):** Стабильный ритм (default)\n"
+            "🔥 **Deep (15/день):** Интенсив + AI Tutor + Pomodoro\n"
+            "⚙️ **Custom:** Сами укажите кол-во (1-30)\n\n"
+            "↕️ Выберите удобный вариант:"
+        ),
+        "en": (
+            "🎓 **Choose your study plan:**\n\n"
+            "🌱 **Lite (3/day):** Easy pace for busy days\n"
+            "🐢 **Steady (5/day):** Balanced rhythm (default)\n"
+            "🔥 **Deep (15/day):** Intensive + AI Tutor + Pomodoro\n"
+            "⚙️ **Custom:** Set your own goal (1-30)\n\n"
+            "↕️ Pick the plan that fits you:"
+        ),
+    },
+    "plan_set_success": {
+        "hy": "✅ Պլանը փոխվեց — **{plan_label}** ({goal} բառ/օր):",
+        "ru": "✅ План изменён — **{plan_label}** ({goal} слов/день).",
+        "en": "✅ Plan updated — **{plan_label}** ({goal} words/day).",
+    },
+    "plan_custom_ask": {
+        "hy": "⚙️ Ուղարկիր թիվ 1-30 — քո օրական բառի նպատակը:",
+        "ru": "⚙️ Отправьте число от 1 до 30 — ваша дневная цель:",
+        "en": "⚙️ Send a number from 1 to 30 — your daily word goal:",
+    },
+    "global_progress_text": {
+        "hy": (
+            "🗺 **Քո Ճանապարհը (Global Progress)**\n\n"
+            "📍 Ներկայիս մակարդակը՝ **{level}**\n"
+            "🎯 Հաջորդ թիրախը՝ **{next_level}**\n\n"
+            "📚 Սովորած բառեր՝ **{learned} / {total_words}**\n"
+            "`{progress_bar}` {percent}%\n"
+            "📈 Մինչև {next_level} մնացել է ևս **{remaining} բառ**\n\n"
+            "🔥 Անընդմեջ օրեր՝ **{streak} օր**\n"
+            "🧠 Դժվար բառեր՝ **{hard} բառ**\n"
+            "⚖️ Ճշգրտություն՝ **{accuracy}%**"
+        ),
+        "ru": (
+            "🗺 **Ваш Прогресс (Global Progress)**\n\n"
+            "📍 Текущий уровень: **{level}**\n"
+            "🎯 Следующая цель: **{next_level}**\n\n"
+            "📚 Изучено слов: **{learned} / {total_words}**\n"
+            "`{progress_bar}` {percent}%\n"
+            "📈 До {next_level} осталось **{remaining} слов**\n\n"
+            "🔥 Дней подряд: **{streak} дней**\n"
+            "🧠 Сложных слов: **{hard} слов**\n"
+            "⚖️ Точность: **{accuracy}%**"
+        ),
+        "en": (
+            "🗺 **Your Roadmap (Global Progress)**\n\n"
+            "📍 Current Level: **{level}**\n"
+            "🎯 Next Target: **{next_level}**\n\n"
+            "📚 Learned Words: **{learned} / {total_words}**\n"
+            "`{progress_bar}` {percent}%\n"
+            "📈 Words left until {next_level}: **{remaining} words**\n\n"
+            "🔥 Current Streak: **{streak} days**\n"
+            "🧠 Hard Words: **{hard} words**\n"
+            "⚖️ Accuracy: **{accuracy}%**"
+        ),
     },
     "roadmap_title_deep": {
-        "hy": "🗺 **Քո օրվա պլանը (Ինտենսիվ):**\nՀետևիր այս քայլերին լավագույն արդյունքի համար:",
-        "ru": "🗺 **Ваш план на день (Интенсивный):**\nСледуйте этим шагам для наилучшего результата:",
-        "en": "🗺 **Your Daily Plan (Deep Focus):**\nFollow these steps for best results:",
+        "hy": "🎯 **Քո օրվա պլանը (🔥 Deep):**\nՀետևիր այս քայլերին լավագույն արդյունքի համար:",
+        "ru": "🎯 **Ваш план на день (🔥 Deep):**\nСледуйте этим шагам для наилучшего результата:",
+        "en": "🎯 **Your Daily Plan (🔥 Deep Focus):**\nFollow these steps for best results:",
     },
     "roadmap_title_steady": {
-        "hy": "🗺 **Քո օրվա պլանը (Հանգիստ):**\nՀետևիր այս քայլերին լավագույն արդյունքի համար:",
-        "ru": "🗺 **Ваш план на день (Обычный):**\nСледуйте этим шагам для наилучшего результата:",
-        "en": "🗺 **Your Daily Plan (Steady Learner):**\nFollow these steps for best results:",
+        "hy": "🎯 **Քո օրվա պլանը (🐢 Steady):**\nՀետևիր այս քայլերին լավագույն արդյունքի համար:",
+        "ru": "🎯 **Ваш план на день (🐢 Steady):**\nСледуйте этим шагам для наилучшего результата:",
+        "en": "🎯 **Your Daily Plan (🐢 Steady Learner):**\nFollow these steps for best results:",
+    },
+    "roadmap_title_lite": {
+        "hy": "🎯 **Քո օրվա պլանը (🌱 Lite):**\nՀետևիր այս քայլերին լավագույն արդյունքի համար:",
+        "ru": "🎯 **Ваш план на день (🌱 Lite):**\nСледуйте этим шагам для наилучшего результата:",
+        "en": "🎯 **Your Daily Plan (🌱 Lite):**\nFollow these steps for best results:",
+    },
+    "roadmap_title_custom": {
+        "hy": "🎯 **Քո օրվա պլանը (⚙️ Custom):**\nՀետևիր այս քայլերին լավագույն արդյունքի համար:",
+        "ru": "🎯 **Ваш план на день (⚙️ Custom):**\nСледуйте этим шагам для наилучшего результата:",
+        "en": "🎯 **Your Daily Plan (⚙️ Custom):**\nFollow these steps for best results:",
     },
     "step_review": {
         "hy": "Կրկնություն ({count} բառ)",
@@ -625,6 +753,11 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "hy": "🚀 **Դուք արդեն ունեք ակտիվ Focus Session:**\n\n⏳ Մնացել է՝ `{time_str}`\n\nՇարունակիր սովորել 💪",
         "ru": "🚀 **У вас уже есть активная фокус-сессия:**\n\n⏳ Осталось: `{time_str}`\n\nПродолжайте учиться 💪",
         "en": "🚀 **You already have an active Focus Session:**\n\n⏳ Remaining: `{time_str}`\n\nKeep learning 💪",
+    },
+    "pomo_active_progress": {
+        "hy": "⏱ **Focus Session-ը ակտիվ է**\n\n⏳ Մնացել է՝ `{time_str}`\n\n{bar} `{pct}%`\n\nԿենտրոնացիր ուսման վրա 📚",
+        "ru": "⏱ **Фокус-сессия активна**\n\n⏳ Осталось: `{time_str}`\n\n{bar} `{pct}%`\n\nСосредоточьтесь на учебе 📚",
+        "en": "⏱ **Focus Session Active**\n\n⏳ Remaining: `{time_str}`\n\n{bar} `{pct}%`\n\nFocus on your studies 📚",
     },
     "pomo_intro": {
         "hy": "⏱ **Pomodoro Timer**\n\n25 րոպեանոց ֆոկուս սեսիան կօգնի քեզ ավելի արդյունավետ սովորել առանց հոգնելու։\nՊատրա՞ստ ես սկսել։",

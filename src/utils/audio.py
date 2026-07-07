@@ -12,12 +12,12 @@ from aiogram.types import FSInputFile, Message
 from gtts import gTTS
 
 from src.bot.ui import get_pronunciation_feedback_keyboard
+from src.core.app_state import record_temp_message, record_word_action
 from src.core.config import GEMINI_API_KEY
+from src.core.i18n import get_lang, t
 from src.data.api_words import GeminiClient
 from src.data.level_words import chunk_text as _chunk_text
 from src.database.models import get_voice_file_id, save_voice_file_id
-from src.core.app_state import record_temp_message, record_word_action
-from src.core.i18n import get_lang, t
 
 
 def _safe_accent(accent: str) -> str:
@@ -69,25 +69,34 @@ async def _fetch_word_phonetic(word: str) -> str:
     return "—"
 
 
+AUDIO_RAM_CACHE: dict[str, str] = {}
+
+
 async def send_word_pronunciation(bot: Bot, chat_id: int, word: str, accent: str = "us"):
-    """Sends word pronunciation as a voice message, with caching and TTS fallback. Supports 'us' and 'uk' accents."""
+    """Sends word pronunciation as a voice message, with double-layer RAM + DB caching and gTTS fallback."""
     word = (word or "").strip().lower()
     accent = _safe_accent(accent)
     cache_key = f"{word}_{accent}"
 
-    # 1. Check cache
-    file_id = await get_voice_file_id(cache_key)
+    # 1. Check RAM cache first (<1ms)
+    file_id = AUDIO_RAM_CACHE.get(cache_key)
+
+    # 2. Check DB cache if not in RAM
+    if not file_id:
+        file_id = await get_voice_file_id(cache_key)
+
     if file_id:
         try:
             msg = await bot.send_voice(chat_id, file_id)
             record_temp_message(chat_id, msg.message_id)
             record_word_action(chat_id, {"type": "audio", "file_id": file_id})
+            AUDIO_RAM_CACHE[cache_key] = file_id
             return msg
         except Exception:
             logging.warning(f"Cached file_id {file_id} for word '{cache_key}' is invalid or expired.")
+            AUDIO_RAM_CACHE.pop(cache_key, None)
 
-    # 2. Use gTTS with specific accent
-    # US: tld='com', UK: tld='co.uk'
+    # 3. Generate gTTS with specific accent
     tld = "co.uk" if accent == "uk" else "com"
     tmp = tempfile.NamedTemporaryFile(prefix=f"temp_pron_{accent}_", suffix=".mp3", delete=False)
     temp_filename = tmp.name
@@ -101,12 +110,20 @@ async def send_word_pronunciation(bot: Bot, chat_id: int, word: str, accent: str
         msg = await bot.send_voice(chat_id, voice_file)
         record_temp_message(chat_id, msg.message_id)
         if msg.voice:
-            record_word_action(chat_id, {"type": "audio", "file_id": msg.voice.file_id})
-            await save_voice_file_id(cache_key, msg.voice.file_id)
+            saved_id = msg.voice.file_id
+            record_word_action(chat_id, {"type": "audio", "file_id": saved_id})
+            AUDIO_RAM_CACHE[cache_key] = saved_id
+            await save_voice_file_id(cache_key, saved_id)
         return msg
     except Exception:
         logging.exception(f"gTTS {accent} failed for word '{word}'")
-        await bot.send_message(chat_id, f"⚠️ Չհաջողվեց բեռնել {accent.upper()} արտասանությունը։")
+        lang = get_lang(chat_id)
+        fallback_msg = {
+            "hy": f"⚠️ Չհաջողվեց բեռնել {accent.upper()} արտասանությունը։",
+            "ru": f"⚠️ Не удалось загрузить произношение ({accent.upper()}).",
+            "en": f"⚠️ Failed to load {accent.upper()} pronunciation.",
+        }
+        await bot.send_message(chat_id, fallback_msg.get(lang, fallback_msg["hy"]))
     finally:
         if os.path.exists(temp_filename):
             try:
@@ -134,8 +151,6 @@ async def verify_pronunciation_with_ai(bot: Bot, message: Message, target_word: 
         return await message.answer("⚠️ Ձայնային հաղորդագրություն չի գտնվել։ Ուղարկիր հենց Voice կամ Audio ֆայլ։")
 
     lang = get_lang(message.chat.id)
-    lang_names = {"hy": "Armenian", "ru": "Russian", "en": "English"}
-    target_lang = lang_names.get(lang, "Armenian")
 
     status_msg = await message.answer(t("pronunciation_analyzing", lang))
     record_temp_message(message.chat.id, status_msg.message_id)
@@ -162,17 +177,42 @@ async def verify_pronunciation_with_ai(bot: Bot, message: Message, target_word: 
         audio_b64 = base64.b64encode(audio_data).decode("utf-8")
         phonetic = await _fetch_word_phonetic(target_word)
 
-        prompt = (
-            f"Target word: '{target_word}'\n"
-            f"Standard IPA transcription: [{phonetic}]\n\n"
-            f"Analyze the audio and provide structured ELSA Speak style pronunciation feedback in {target_lang}.\n"
-            "Respond ONLY with clean Markdown (no conversational intros):\n"
-            f"1. **🎯 Score:** Give an overall score X/100 (e.g. 85/100).\n"
-            f"2. **🗣️ What I heard:** Write how the user actually pronounced it in IPA or phonetic approximation.\n"
-            f"3. **✅ Correct pronunciation:** Show the standard IPA and explain syllable stress.\n"
-            f"4. **💡 How to improve:** Detail specific errors and give concrete advice on tongue/lip placement in {target_lang}.\n\n"
-            "Keep the feedback warm, encouraging, pedagogical, and structured!"
-        )
+        if lang == "hy":
+            prompt = (
+                f"Թիրախային բառ՝ '{target_word}'\n"
+                f"Ստանդարտ IPA տառադարձում՝ [{phonetic}]\n\n"
+                f"Վերլուծիր աուդիոձայնագրությունը և տրամադրիր ELSA Speak ոճի կառուցվածքային արտասանական կարծիք բացառապես հայերենով:\n"
+                "Պատասխանիր ՄԻԱՅՆ Մարկդաունով (առանց ներածական խոսքերի) հետևյալ կառուցվածքով․\n"
+                f"1. **🎯 Միավոր:** Տուր ընդհանուր գնահատական X/100 (օրինակ՝ 85/100):\n"
+                f"2. **🗣️ Ինչ լսվեց:** Գրիր, թե ինչպես է օգտատերը իրականում արտասանել բառը IPA-ով կամ հնչյունական մոտարկմամբ:\n"
+                f"3. **✅ Ճիշտ արտասանություն:** Ցույց տուր ստանդարտ IPA-ն և բացատրիր վանկերի շեշտադրումը:\n"
+                f"4. **💡 Ինչպես բարելավել:** Մանրամասնիր կոնկրետ սխալները և տուր հստակ խորհուրդներ լեզվի/շուրթերի դիրքի և օդի հոսքի վերաբերյալ հայերենով:\n\n"
+                "Պահպանիր ջերմ, խրախուսող, մանկավարժական և կառուցվածքային տոն:"
+            )
+        elif lang == "ru":
+            prompt = (
+                f"Целевое слово: '{target_word}'\n"
+                f"Стандартная транскрипция IPA: [{phonetic}]\n\n"
+                f"Проанализируй аудиозапись и предоставь структурированный отзыв о произношении в стиле ELSA Speak исключительно на русском языке.\n"
+                "Отвечай ТОЛЬКО с использованием Markdown (без лишних вступлений) по следующей структуре:\n"
+                f"1. **🎯 Оценка:** Дай общую оценку X/100 (например, 85/100).\n"
+                f"2. **🗣️ Что я услышал:** Напиши, как пользователь на самом деле произнес слово в IPA или фонетическом приближении.\n"
+                f"3. **✅ Правильное произношение:** Покажи стандартное IPA и объясни ударение в слогах.\n"
+                f"4. **💡 Как улучшить:** Опиши конкретные ошибки и дай практические советы по положению языка/губ на русском языке.\n\n"
+                "Сохраняй теплый, ободряющий, педагогический и структурированный тон."
+            )
+        else:
+            prompt = (
+                f"Target word: '{target_word}'\n"
+                f"Standard IPA transcription: [{phonetic}]\n\n"
+                f"Analyze the audio and provide structured ELSA Speak style pronunciation feedback in English.\n"
+                "Respond ONLY with clean Markdown (no conversational intros):\n"
+                f"1. **🎯 Score:** Give an overall score X/100 (e.g. 85/100).\n"
+                f"2. **🗣️ What I heard:** Write how the user actually pronounced it in IPA or phonetic approximation.\n"
+                f"3. **✅ Correct pronunciation:** Show the standard IPA and explain syllable stress.\n"
+                f"4. **💡 How to improve:** Detail specific errors and give concrete advice on tongue/lip placement in English.\n\n"
+                "Keep the feedback warm, encouraging, pedagogical, and structured!"
+            )
 
         text = await GeminiClient.generate(
             prompt=prompt,
